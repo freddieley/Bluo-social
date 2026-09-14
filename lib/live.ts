@@ -17,6 +17,14 @@ function distanceText(lat: number, lng: number, myLat?: number, myLng?: number) 
   return `${(metres / 1000).toFixed(1)} km`;
 }
 
+export async function validateLaunchCode(supabase: SupabaseClient, code: string) {
+  const clean = code.trim();
+  if (!clean) return false;
+  const { data, error } = await supabase.rpc('validate_launch_code', { p_code: clean });
+  if (error) throw error;
+  return data === true;
+}
+
 export async function ensureProfile(supabase: SupabaseClient, user: User) {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   if (error) throw error;
@@ -54,7 +62,7 @@ export async function loadPeople(supabase: SupabaseClient, currentUserId: string
     return {
       id: p.id,
       name: p.display_name,
-      year: p.year_group ?? 12,
+      year: p.year_group ?? 0,
       distance: loc ? distanceText(loc.lat, loc.lng, myLocation?.[0], myLocation?.[1]) : 'offline',
       status: p.status || (loc ? 'Around campus' : 'Not sharing location'),
       free: false,
