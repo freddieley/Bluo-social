@@ -1,2 +1,4 @@
 import { BluoApp } from '@/components/BluoApp';
-export default function Home(){ return <BluoApp/>; }
+import { TimetableOCR } from '@/components/TimetableOCR';
+
+export default function Home(){ return <><BluoApp/><TimetableOCR/></>; }
