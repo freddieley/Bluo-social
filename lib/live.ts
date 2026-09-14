@@ -6,6 +6,7 @@ const fallbackAvatar: AvatarConfig = { skin: '#F0B98A', hair: '#2A1C17', shirt: 
 type ProfileRow = { id: string; display_name: string; username: string; year_group: number | null; community: string; avatar: AvatarConfig; status: string; location_mode: string; visible_to: string; dnd: boolean; updated_at: string };
 type FollowRow = { follower_id: string; following_id: string };
 type LocationRow = { user_id: string; lat: number; lng: number; accuracy_m: number | null; updated_at: string; exact: boolean };
+type AvailabilityRow = { user_id: string; free: boolean };
 type TimetableRow = { id: string; user_id: string; day: number; start_time: string; end_time: string; subject: string; room: string | null };
 
 function distanceText(lat: number, lng: number, myLat?: number, myLng?: number) {
@@ -38,17 +39,21 @@ export async function updateProfile(supabase: SupabaseClient, userId: string, pa
 }
 
 export async function loadPeople(supabase: SupabaseClient, currentUserId: string, myLocation?: [number, number]) {
-  const [{ data: profiles, error: profileError }, { data: follows, error: followError }, { data: locations, error: locationError }] = await Promise.all([
+  const [{ data: profiles, error: profileError }, { data: follows, error: followError }, { data: locations, error: locationError }, { data: availability, error: availabilityError }] = await Promise.all([
     supabase.from('profiles').select('*').order('display_name'),
     supabase.from('follows').select('follower_id,following_id'),
     supabase.rpc('get_visible_locations'),
+    supabase.rpc('get_visible_availability'),
   ]);
   if (profileError) throw profileError;
   if (followError) throw followError;
   if (locationError) throw locationError;
+  if (availabilityError) throw availabilityError;
 
   const followRows = (follows ?? []) as FollowRow[];
   const locationRows = (locations ?? []) as LocationRow[];
+  const availabilityRows = (availability ?? []) as AvailabilityRow[];
+  const availabilityMap = new Map(availabilityRows.map((a) => [a.user_id, a.free]));
   const following = new Set(followRows.filter((f) => f.follower_id === currentUserId).map((f) => f.following_id));
   const followers = new Set(followRows.filter((f) => f.following_id === currentUserId).map((f) => f.follower_id));
   const mutual = new Set([...following].filter((id) => followers.has(id)));
@@ -65,7 +70,7 @@ export async function loadPeople(supabase: SupabaseClient, currentUserId: string
       year: p.year_group ?? 0,
       distance: loc ? distanceText(loc.lat, loc.lng, myLocation?.[0], myLocation?.[1]) : 'offline',
       status: p.status || (loc ? 'Around campus' : 'Not sharing location'),
-      free: false,
+      free: availabilityMap.get(p.id) ?? false,
       avatar: p.avatar || fallbackAvatar,
       location: loc ? [loc.lat, loc.lng] : [0, 0],
       updated: loc ? new Date(loc.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—',
