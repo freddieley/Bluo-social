@@ -1,30 +1,48 @@
 -- Bluo production policy hardening.
 -- Run after 004_graduation_year_and_launch_access.sql.
 
--- Users may edit their own profile, but can never move themselves to another
--- community or change the generated username through the browser.
+-- The browser may edit normal profile fields, but generated identity fields
+-- cannot be changed by a client.
+create or replace function public.protect_profile_identity()
+returns trigger
+language plpgsql
+security definer
+set search_path=''
+as $$
+begin
+  new.username := old.username;
+  new.community := old.community;
+  new.id := old.id;
+  new.created_at := old.created_at;
+  return new;
+end;
+$$;
+
+revoke all on function public.protect_profile_identity() from public;
+revoke all on function public.protect_profile_identity() from anon, authenticated;
+
+drop trigger if exists protect_profile_identity on public.profiles;
+create trigger protect_profile_identity
+before update on public.profiles
+for each row execute procedure public.protect_profile_identity();
+
 drop policy if exists "users update own profile" on public.profiles;
 create policy "users update own profile" on public.profiles
 for update to authenticated
-using (auth.uid() = id)
-with check (
-  auth.uid() = id
-  and community = (select p.community from public.profiles p where p.id = auth.uid())
-  and username = (select p.username from public.profiles p where p.id = auth.uid())
-);
+using ((select auth.uid()) = id)
+with check ((select auth.uid()) = id);
 
 -- Group owners must keep groups inside their own community.
 drop policy if exists "group owner update" on public.groups;
 create policy "group owner update" on public.groups
 for update to authenticated
-using (auth.uid() = owner_id)
+using ((select auth.uid()) = owner_id)
 with check (
-  auth.uid() = owner_id
+  (select auth.uid()) = owner_id
   and community = public.my_community()
 );
 
 -- Lock In must actually suppress location visibility.
--- Hidden users and DND users are omitted from the location RPC entirely.
 drop function if exists public.get_visible_locations();
 create or replace function public.get_visible_locations()
 returns table(user_id uuid, lat double precision, lng double precision, accuracy_m real, updated_at timestamptz, exact boolean)
