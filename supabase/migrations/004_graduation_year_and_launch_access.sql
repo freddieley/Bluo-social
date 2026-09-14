@@ -1,6 +1,9 @@
 -- Bluo auth update: durable graduation years + private PSC launch access.
 -- Run this migration once after 003_launch_hardening.sql.
 
+-- pgcrypto is supplied by Supabase but may be installed in the extensions schema.
+create extension if not exists pgcrypto with schema extensions;
+
 -- Existing 2026/27 accounts used current year-group numbers. Convert them once.
 update public.profiles
 set year_group = case
@@ -67,7 +70,7 @@ revoke all on table public.launch_access_codes from anon, authenticated;
 
 -- After applying this migration, create the private code in Supabase SQL Editor with:
 -- insert into public.launch_access_codes(code_hash)
--- values (encode(public.digest(lower(trim('YOUR_PRIVATE_CODE')), 'sha256'),'hex'));
+-- values (encode(extensions.digest(lower(trim('YOUR_PRIVATE_CODE')), 'sha256'),'hex'));
 
 drop function if exists public.validate_launch_code(text);
 create function public.validate_launch_code(p_code text)
@@ -81,7 +84,7 @@ as $$
     select 1
     from public.launch_access_codes
     where active
-      and code_hash = encode(public.digest(lower(trim(coalesce(p_code,''))), 'sha256'),'hex')
+      and code_hash = encode(extensions.digest(lower(trim(coalesce(p_code,''))), 'sha256'),'hex')
   );
 $$;
 revoke all on function public.validate_launch_code(text) from public;
