@@ -10,7 +10,12 @@ set search_path=public
 as $$
   select
     p.id as user_id,
-    not exists (
+    exists (
+      select 1
+      from public.timetables t
+      where t.user_id = p.id
+    )
+    and not exists (
       select 1
       from public.timetables t
       where t.user_id = p.id
