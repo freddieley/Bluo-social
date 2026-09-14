@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {"dev":"next dev","build":"next build","start":"next start","lint":"tsc --noEmit"},
   "dependencies": {
-    "@maplibre/maplibre-gl-js":"^5.16.0",
     "@supabase/ssr":"^0.7.0",
     "@supabase/supabase-js":"^2.57.0",
     "clsx":"^2.1.1",
