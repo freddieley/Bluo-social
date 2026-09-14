@@ -11,6 +11,9 @@ end
 where year_group in (12, 13);
 
 -- New accounts store the year they are expected to leave/graduate.
+alter table public.profiles drop constraint if exists profiles_year_group_check;
+alter table public.profiles add constraint profiles_year_group_check check (year_group is null or year_group between 2027 and 2040);
+
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path='' as $$
 declare
