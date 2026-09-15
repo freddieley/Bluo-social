@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     });
 
     const { data: codeValid, error: codeError } = await admin.rpc('validate_launch_code', { p_code: accessCode });
-    if (codeError) return jsonError('Could not verify the launch code.', 500);
+    if (codeError) { console.error('validate_launch_code failed', codeError); return jsonError('Could not verify the launch code.', 500); }
     if (codeValid !== true) return jsonError('That PSC launch code is not valid.');
 
     // Create the account already confirmed — PSC identity cannot be verified yet,
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
 
     if (createError) {
       if (/registered/i.test(createError.message)) return jsonError('That email already has a Bluo account. Try signing in instead.', 409);
+      console.error('createUser failed', createError);
       return jsonError('Could not create your account right now.', 500);
     }
 
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
     });
 
     const payload = await response.json();
-    if (!response.ok) return jsonError('Account created — please sign in.', 401);
+    if (!response.ok) { console.error('password grant failed after signup', payload); return jsonError('Account created — please sign in.', 401); }
 
     return NextResponse.json({
       access_token: payload.access_token,
@@ -72,7 +73,8 @@ export async function POST(request: Request) {
       token_type: payload.token_type,
       user: payload.user,
     });
-  } catch {
+  } catch (e) {
+    console.error('signup route threw', e);
     return jsonError('Could not create your account right now.', 500);
   }
 }
