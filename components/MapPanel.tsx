@@ -58,7 +58,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     let disposed = false;
     void import('maplibre-gl').then(({ Map }) => {
       if (disposed || !mapHost.current) return;
-      const map = new Map({ container: mapHost.current, style: 'https://tiles.openfreemap.org/styles/liberty', center: [-1.3284, 51.0665], zoom: 16.2, minZoom: 14, maxZoom: 19, attributionControl: true });
+      const map = new Map({ container: mapHost.current, style: 'https://tiles.openfreemap.org/styles/liberty', center: [-1.3284, 51.0665], zoom: 16.2, minZoom: 14, maxZoom: 19, attributionControl: false });
       mapRef.current = map;
       map.on('load', () => { if (!disposed) setMapReady(true); });
     }).catch(() => setMapReady(false));
@@ -78,6 +78,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     void import('maplibre-gl').then(({ Marker }) => {
       if (cancelled || !mapRef.current) return;
       markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
       markersRef.current = positioned.map(({ person }) => new Marker({ element: markerElement(person) }).setLngLat([person.location[1], person.location[0]]).addTo(mapRef.current!));
     });
     return () => { cancelled = true; };
