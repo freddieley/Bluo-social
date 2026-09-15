@@ -31,6 +31,7 @@ Run these in order in the Supabase SQL Editor:
 3. `supabase/migrations/003_launch_hardening.sql`
 4. `supabase/migrations/004_graduation_year_and_launch_access.sql`
 5. `supabase/migrations/005_production_policy_hardening.sql`
+6. `supabase/migrations/008_fix_launch_code_digest_schema.sql`
 
 Then create the private launch-code hash using `extensions.digest(...)`. Never commit the plaintext launch code.
 
