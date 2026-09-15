@@ -63,6 +63,13 @@ let enginePromise: Promise<OcrEngine> | null = null;
 export function loadOcrEngine(): Promise<OcrEngine> {
   if (!enginePromise) {
     enginePromise = (async () => {
+      // Some hosts expose a stub `process` global; onnxruntime-web's Node-detection sees it and
+      // calls process.binding(), which that stub doesn't implement. Remove it so the library
+      // correctly falls back to its browser/WASM path instead of crashing.
+      const globalWithProcess = globalThis as unknown as { process?: unknown };
+      if (typeof globalWithProcess.process !== 'undefined') {
+        try { delete globalWithProcess.process; } catch { globalWithProcess.process = undefined; }
+      }
       const paddleOcrUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle&target=es2022';
       const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
       return PaddleOCR.create({ lang: 'en', ocrVersion: 'PP-OCRv5', ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/', numThreads: 2, simd: true } });
