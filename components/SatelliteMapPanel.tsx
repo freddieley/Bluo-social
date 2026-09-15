@@ -59,7 +59,7 @@ function SatelliteMap({ people }: { people: Person[] }) {
         zoom: 16.8,
         minZoom: 14,
         maxZoom: 19,
-        attributionControl: true,
+        attributionControl: false,
         style: {
           version: 8,
           sources: {
