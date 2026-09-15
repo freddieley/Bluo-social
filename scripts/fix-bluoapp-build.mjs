@@ -11,3 +11,5 @@ if (source.includes(broken)) {
 } else {
   console.log('BluoApp.tsx notification JSX already fixed.');
 }
+
+// Keep this repair idempotent while the source is cleaned up.
