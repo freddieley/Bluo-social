@@ -39,15 +39,17 @@ export async function POST(request: Request) {
 
     // Create the account already confirmed — PSC identity cannot be verified yet,
     // so requiring an email confirmation link would just lock genuine students out.
+    // The DB trigger re-validates the access code and rejects the whole insert if it's invalid.
     const { error: createError } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { name, year_group: yearGroup },
+      user_metadata: { name, year_group: yearGroup, access_code: accessCode },
     });
 
     if (createError) {
       if (/registered/i.test(createError.message)) return jsonError('That email already has a Bluo account. Try signing in instead.', 409);
+      if (/launch_code|launch code/i.test(createError.message)) return jsonError('That PSC launch code is not valid.', 400);
       console.error('createUser failed', createError);
       return jsonError('Could not create your account right now.', 500);
     }
