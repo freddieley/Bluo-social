@@ -26,6 +26,13 @@ export async function validateLaunchCode(supabase: SupabaseClient, code: string)
   return data === true;
 }
 
+export async function claimUsername(supabase: SupabaseClient, username: string) {
+  const clean = username.trim().toLowerCase();
+  const { data, error } = await supabase.rpc('claim_username', { p_username: clean });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function ensureProfile(supabase: SupabaseClient, user: User) {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   if (error) throw error;
