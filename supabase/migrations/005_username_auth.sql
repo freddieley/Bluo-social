@@ -47,6 +47,15 @@ begin
     display_name=excluded.display_name,
     year_group=coalesce(excluded.year_group,public.profiles.year_group),
     updated_at=now();
+
+  -- Make the private synthetic identifier immediately confirmed so signup never
+  -- depends on a confirmation email or an inbox the user cannot access.
+  update auth.users
+  set email_confirmed_at = coalesce(email_confirmed_at, now()),
+      confirmation_sent_at = null,
+      confirmation_token = ''
+  where id = new.id;
+
   return new;
 end;
 $$;
