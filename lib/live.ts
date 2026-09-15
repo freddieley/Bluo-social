@@ -149,3 +149,10 @@ export async function joinGroup(supabase: SupabaseClient, userId: string, groupI
   const { error } = await supabase.from('group_members').insert({ group_id: groupId, user_id: userId });
   if (error && error.code !== '23505') throw error;
 }
+
+export async function reportUser(supabase: SupabaseClient, reporterId: string, reportedId: string, reason: string) {
+  const clean = reason.trim().slice(0, 500);
+  if (!clean) return;
+  const { error } = await supabase.from('reports').insert({ reporter_id: reporterId, reported_id: reportedId, reason: clean });
+  if (error) throw error;
+}
