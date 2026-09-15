@@ -43,6 +43,7 @@ Set these variables for Preview and Production:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (preferred)
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy fallback)
+- `SUPABASE_SERVICE_ROLE_KEY` — required server-side for signup and username login; the app returns "Authentication is not configured." on those routes without it
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` when web push is enabled
 - `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` only on trusted server-side code
 
