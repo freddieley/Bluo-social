@@ -75,7 +75,10 @@ export function TimetableOCR() {
     setBusy(true); setMessage('Loading the free on-device OCR engine…'); setSaved(false);
     try {
       if (!ocrRef.current) {
-        const { PaddleOCR } = await import('@paddleocr/paddleocr-js');
+        // Keep the heavy browser-only OCR SDK out of the Next.js/Turbopack build.
+        // It is loaded only after the user chooses to scan, and inference remains on-device.
+        const paddleOcrUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle&target=es2022';
+        const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
         ocrRef.current = await PaddleOCR.create({ lang: 'en', ocrVersion: 'PP-OCRv5', ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/', numThreads: 2, simd: true } });
       }
       setMessage('Reading your timetable on this device…');
