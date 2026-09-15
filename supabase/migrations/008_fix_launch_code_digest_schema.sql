@@ -22,4 +22,4 @@ as $$
   );
 $$;
 revoke all on function public.validate_launch_code(text) from public;
-grant execute on function public.validate_launch_code(text) to anon, authenticated;
+grant execute on function public.validate_launch_code(text) to anon, authenticated, service_role;
