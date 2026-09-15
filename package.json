@@ -2,7 +2,7 @@
   "name": "bluo-social",
   "version": "0.1.0",
   "private": true,
-  "scripts": {"dev":"next dev","build":"next build","start":"next start","lint":"tsc --noEmit"},
+  "scripts": {"dev":"next dev","build":"node scripts/fix-bluoapp-build.mjs && next build","start":"next start","lint":"tsc --noEmit"},
   "dependencies": {
     "@supabase/ssr":"^0.7.0",
     "@supabase/supabase-js":"^2.57.0",
