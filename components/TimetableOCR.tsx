@@ -60,10 +60,15 @@ function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[] {
   return result.filter((lesson, index, all) => all.findIndex(x => x.day === lesson.day && x.start === lesson.start && x.end === lesson.end && x.name === lesson.name) === index).sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
 }
 
+type OcrEngine = {
+  predict: (image: Blob) => Promise<Array<{ image: { width: number; height: number }; items: OcrItem[] }>>;
+  dispose?: () => void;
+};
+
 export function TimetableOCR() {
   const [open, setOpen] = useState(false); const [signedIn, setSignedIn] = useState(false); const [file, setFile] = useState<File | null>(null); const [preview, setPreview] = useState(''); const [lessons, setLessons] = useState<OcrLesson[]>([]); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [saved, setSaved] = useState(false);
   const sb = supabaseBrowser();
-  const ocrRef = useRef<{ predict: (image: Blob) => Promise<Array<{ image: { width: number; height: number }; items: OcrItem[] }>>; dispose?: () => void } | null>(null);
+  const ocrRef = useRef<OcrEngine | null>(null);
 
   useEffect(() => { if (!sb) return; void sb.auth.getUser().then(({ data }) => setSignedIn(Boolean(data.user))); const { data } = sb.auth.onAuthStateChange((_event, session) => setSignedIn(Boolean(session?.user))); return () => data.subscription.unsubscribe(); }, [sb]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); ocrRef.current?.dispose?.(); }, [preview]);
@@ -75,14 +80,14 @@ export function TimetableOCR() {
     setBusy(true); setMessage('Loading the free on-device OCR engine…'); setSaved(false);
     try {
       if (!ocrRef.current) {
-        // Keep the heavy browser-only OCR SDK out of the Next.js/Turbopack build.
-        // It is loaded only after the user chooses to scan, and inference remains on-device.
         const paddleOcrUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle&target=es2022';
         const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
         ocrRef.current = await PaddleOCR.create({ lang: 'en', ocrVersion: 'PP-OCRv5', ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/', numThreads: 2, simd: true } });
       }
+      const ocr = ocrRef.current;
+      if (!ocr) throw new Error('The OCR engine could not be loaded. Please try again.');
       setMessage('Reading your timetable on this device…');
-      const [result] = await ocrRef.current.predict(file);
+      const [result] = await ocr.predict(file);
       const clean = parseTimetable(result.items, result.image.width);
       if (!clean.length) throw new Error('I could not confidently find the timetable cells. Try a clearer screenshot.');
       setLessons(clean); setMessage(`Found ${clean.length} lesson${clean.length === 1 ? '' : 's'}. Check them before saving.`);
