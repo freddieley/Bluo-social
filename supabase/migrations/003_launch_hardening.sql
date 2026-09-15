@@ -1,8 +1,8 @@
 -- Bluo launch hardening. Run after schema.sql and 002_security_hardening.sql.
 -- 1. The browser must not be able to bypass the location RPC/rate limit.
 revoke all on table public.locations from authenticated;
-grant select on table public.locations to authenticated;
--- Keep SELECT denied by RLS; the RPC is the only location read path.
+grant insert, update on table public.locations to authenticated;
+-- The RPC is the only location read path; raw coordinates must never be selectable.
 
 -- 2. Fix the PSC email regex and make malformed year-group metadata harmless.
 create or replace function public.is_psc_email(email text)

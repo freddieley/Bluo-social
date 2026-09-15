@@ -4,7 +4,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null check (char_length(display_name) between 1 and 60),
-  username text unique not null check (username ~ '^[a-z0-9_]{3,30}$'),
+  username text unique not null check (username ~ '^[a-z0-9_]{3,20}$'),
   year_group smallint,
   community text not null default 'psc',
   avatar jsonb not null default '{"skin":"#F0B98A","hair":"#2A1C17","shirt":"#1B78FF","bg":"#E8F4FF","eyes":"#26344A","mouth":"#A95B55"}',
@@ -94,7 +94,7 @@ begin
   if not public.is_psc_email(new.email) then raise exception 'Bluo currently requires a @students.psc.ac.uk email'; end if;
   display := left(coalesce(nullif(trim(new.raw_user_meta_data->>'name'),''), split_part(new.email,'@',1)),60);
   base_username := lower(regexp_replace(split_part(new.email,'@',1),'[^a-zA-Z0-9_]','','g'));
-  base_username := left(case when char_length(base_username) < 3 then base_username || 'bluo' else base_username end, 22);
+  base_username := left(case when char_length(base_username) < 3 then base_username || 'bluo' else base_username end, 20);
   candidate := base_username;
   while exists(select 1 from public.profiles where username=candidate) loop
     suffix := suffix + 1;

@@ -21,12 +21,12 @@ begin
 
   display := left(coalesce(nullif(trim(new.raw_user_meta_data->>'name'),''), split_part(new.email,'@',1)),60);
   base_username := lower(regexp_replace(split_part(new.email,'@',1),'[^a-zA-Z0-9_]','','g'));
-  base_username := left(case when char_length(base_username) < 3 then base_username || 'bluo' else base_username end, 22);
+  base_username := left(case when char_length(base_username) < 3 then base_username || 'bluo' else base_username end, 20);
   candidate := base_username;
 
   while exists(select 1 from public.profiles where username=candidate) loop
     suffix := suffix + 1;
-    candidate := left(base_username, 30-char_length(suffix::text)-1) || '_' || suffix::text;
+    candidate := left(base_username, 20-char_length(suffix::text)-1) || '_' || suffix::text;
   end loop;
 
   requested_year := trim(coalesce(new.raw_user_meta_data->>'year_group',''));

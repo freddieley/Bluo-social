@@ -31,9 +31,13 @@ Run these in order in the Supabase SQL Editor:
 3. `supabase/migrations/003_launch_hardening.sql`
 4. `supabase/migrations/004_graduation_year_and_launch_access.sql`
 5. `supabase/migrations/005_production_policy_hardening.sql`
-6. `supabase/migrations/008_fix_launch_code_digest_schema.sql`
-7. `supabase/migrations/009_grant_launch_code_service_role.sql`
-8. `supabase/migrations/010_enforce_launch_code_in_trigger.sql`
+6. `supabase/migrations/006_user_availability.sql`
+7. `supabase/migrations/006_username_auth.sql`
+8. `supabase/migrations/007_impersonation_reports.sql`
+9. `supabase/migrations/008_fix_launch_code_digest_schema.sql`
+10. `supabase/migrations/009_grant_launch_code_service_role.sql`
+11. `supabase/migrations/010_enforce_launch_code_in_trigger.sql`
+12. `supabase/migrations/011_revoke_raw_location_reads.sql`
 
 Then create the private launch-code hash using `extensions.digest(...)`. Never commit the plaintext launch code.
 
@@ -54,7 +58,7 @@ Never put a Supabase service-role/secret key in a `NEXT_PUBLIC_*` variable or br
 
 ## Auth and launch
 
-Bluo uses email + password authentication for the initial PSC rollout. Signup requires:
+Bluo uses the PSC student email only for eligibility-gated signup. After signup, users sign in with their generated or claimed Bluo username and password. Signup requires:
 
 - a `@students.psc.ac.uk` address
 - real name
