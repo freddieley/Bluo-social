@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseBrowser } from '@/lib/supabase';
 
@@ -12,7 +12,9 @@ function parseCollegeEmail(email: string) {
   return match ? { joinYear: 2000 + Number(match[1]) } : null;
 }
 
-export function AuthGate() {
+type AuthGateProps = { children: ReactNode };
+
+export function AuthGate({ children }: AuthGateProps) {
   const [sb] = useState<SupabaseClient | null>(() => supabaseBrowser());
   const [ready, setReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
@@ -28,6 +30,7 @@ export function AuthGate() {
 
   useEffect(() => {
     if (!sb) {
+      setError('Authentication is not configured.');
       setReady(true);
       return;
     }
@@ -46,12 +49,25 @@ export function AuthGate() {
     };
   }, [sb]);
 
-  if (!sb || !ready || signedIn) return null;
+  if (signedIn) return <>{children}</>;
+
+  if (!ready) {
+    return (
+      <main className="onboarding" style={{ position: 'fixed', inset: 0, zIndex: 10000 }}>
+        <div className="onboarding-card">
+          <div className="logo">Bluo<span className="logo-dot" /></div>
+          <h1>Loading Bluo…</h1>
+          <p>Checking your secure session.</p>
+        </div>
+      </main>
+    );
+  }
 
   const submit = async () => {
     setError('');
     setSubmitting(true);
     try {
+      if (!sb) throw new Error('Authentication is not configured.');
       const cleanUsername = username.trim().toLowerCase();
       if (password.length < 8) throw new Error('Password must be at least 8 characters.');
 
@@ -92,7 +108,7 @@ export function AuthGate() {
   };
 
   return (
-    <div className="onboarding" style={{ position: 'fixed', inset: 0, zIndex: 10000, overflowY: 'auto' }}>
+    <main className="onboarding" style={{ position: 'fixed', inset: 0, zIndex: 10000, overflowY: 'auto' }}>
       <div className="onboarding-card">
         <div className="logo">Bluo<span className="logo-dot" /></div>
         <h1>{mode === 'signup' ? 'Find your people.' : 'Welcome back.'}</h1>
@@ -124,6 +140,6 @@ export function AuthGate() {
         <button className="primary" style={{ width: '100%', marginTop: 16 }} disabled={submitting} onClick={() => void submit()}>{submitting ? (mode === 'signup' ? 'Creating account…' : 'Signing in…') : mode === 'signup' ? 'Create your Bluo account' : 'Sign in'}</button>
         <button className="secondary" style={{ width: '100%', marginTop: 8 }} onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setPassword(''); setError(''); }}>{mode === 'signup' ? 'Already have an account? Sign in' : 'New to Bluo? Create an account'}</button>
       </div>
-    </div>
+    </main>
   );
 }
