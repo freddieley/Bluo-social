@@ -1,14 +1,33 @@
 export type OcrItem = { text: string; score?: number; poly: number[][] };
 export type OcrLesson = { day: number; start: string; end: string; name: string; room: string | null };
 
+type PositionedItem = OcrItem & { x: number; y: number; width: number; height: number };
+
+const daysOfWeek = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 const ignored = /^(break|study period|lunch|free|lesson|monday|tuesday|wednesday|thursday|friday)$/i;
 const rangeRe = /\b(\d{1,2}):([0-5]\d)\s*[-–—]\s*(\d{1,2}):([0-5]\d)\b/;
+const singleTimeRe = /\b(\d{1,2}):([0-5]\d)\b/;
 const roomRe = /^(?:[A-Z]{1,5}\s*)?\d{2,4}[A-Z]?$|^[A-Z]{1,5}\d{2,4}[A-Z]?$/i;
 
 function box(item: OcrItem) {
   const xs = item.poly.flatMap(p => [p[0]]);
   const ys = item.poly.flatMap(p => [p[1]]);
-  return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  const minX = Math.min(...xs); const maxX = Math.max(...xs);
+  const minY = Math.min(...ys); const maxY = Math.max(...ys);
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, width: maxX - minX, height: maxY - minY };
+}
+
+function normalizeItems(items: OcrItem[]): PositionedItem[] {
+  return items
+    .filter(i => i.text.trim() && (i.score ?? 1) >= 0.25 && i.poly?.length >= 4)
+    .map(i => ({ ...i, text: i.text.replace(/\s+/g, ' ').trim(), ...box(i) }))
+    .filter(i => i.width > 0 && i.height > 0);
+}
+
+function parseTime(text: string) {
+  const m = text.replace(/\s+/g, ' ').match(singleTimeRe);
+  if (!m) return null;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
 }
 
 function parseTimeRange(text: string) {
@@ -20,28 +39,37 @@ function parseTimeRange(text: string) {
   return { start, end };
 }
 
+function addMinutes(time: string, minutes: number) {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function dayFromX(x: number, headers: Array<{ day: number; x: number }>, width: number) {
   if (headers.length) return headers.reduce((best, h) => Math.abs(h.x - x) < Math.abs(best.x - x) ? h : best).day;
   const left = width * 0.06, right = width * 0.995;
   return Math.min(5, Math.max(1, Math.floor(((x - left) / (right - left)) * 5) + 1));
 }
 
-export function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[] {
-  const usable = items.filter(i => i.text.trim() && (i.score ?? 1) >= 0.35).map(i => ({ ...i, text: i.text.replace(/\s+/g, ' ').trim(), ...box(i) }));
-  const headers = usable.flatMap(i => {
-    const t = i.text.toLowerCase();
-    const day = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'].findIndex(d => t.startsWith(d));
-    return day >= 0 ? [{ day: day + 1, x: i.x }] : [];
-  });
-  const ranges = usable.map(i => ({ item: i, time: parseTimeRange(i.text) })).filter((x): x is { item: typeof usable[number]; time: { start: string; end: string } } => Boolean(x.time));
+function uniqueLessons(lessons: OcrLesson[]) {
+  return lessons
+    .filter(lesson => lesson.name.trim())
+    .filter((lesson, index, all) => all.findIndex(x => x.day === lesson.day && x.start === lesson.start && x.end === lesson.end && x.name === lesson.name) === index)
+    .sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+}
+
+function parseRangeLayout(items: PositionedItem[], headers: Array<{ day: number; x: number }>, imageWidth: number) {
+  const ranges = items.map(i => ({ item: i, time: parseTimeRange(i.text) })).filter((x): x is { item: PositionedItem; time: { start: string; end: string } } => Boolean(x.time));
   const result: OcrLesson[] = [];
 
   for (const current of ranges) {
     const day = dayFromX(current.item.x, headers, imageWidth);
-    const nextSameDay = ranges.filter(r => r !== current && dayFromX(r.item.x, headers, imageWidth) === day && r.item.y > current.item.y).sort((a, b) => a.item.y - b.item.y)[0];
-    const candidates = usable
+    const nextSameDay = ranges
+      .filter(r => r !== current && dayFromX(r.item.x, headers, imageWidth) === day && r.item.y > current.item.y)
+      .sort((a, b) => a.item.y - b.item.y)[0];
+    const candidates = items
       .filter(i => i !== current.item && i.x > current.item.x - imageWidth * 0.08 && i.x < current.item.x + imageWidth * 0.08 && i.y > current.item.y + 8 && (!nextSameDay || i.y < nextSameDay.item.y - 5))
-      .filter(i => !parseTimeRange(i.text) && !ignored.test(i.text))
+      .filter(i => !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text))
       .sort((a, b) => a.y - b.y);
     const nameItem = candidates.find(i => !roomRe.test(i.text));
     if (!nameItem) continue;
@@ -49,31 +77,89 @@ export function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[
     result.push({ day, start: current.time.start, end: current.time.end, name: nameItem.text, room: roomItem?.text || null });
   }
 
-  return result.filter((lesson, index, all) => all.findIndex(x => x.day === lesson.day && x.start === lesson.start && x.end === lesson.end && x.name === lesson.name) === index).sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+  return uniqueLessons(result);
+}
+
+function parseGridLayout(items: PositionedItem[], headers: Array<{ day: number; x: number }>, imageWidth: number): OcrLesson[] {
+  const timeLabels = items
+    .map(item => ({ item, time: parseTime(item.text) }))
+    .filter((x): x is { item: PositionedItem; time: string } => Boolean(x.time))
+    .sort((a, b) => a.item.y - b.item.y);
+
+  if (!timeLabels.length) return [];
+
+  const rows = timeLabels.filter((entry, index, all) => index === 0 || Math.abs(entry.item.y - all[index - 1].item.y) > Math.max(entry.item.height, all[index - 1].item.height) * 1.5);
+  const rowGap = rows.length > 1
+    ? rows.slice(1).reduce((sum, row, index) => sum + (row.item.y - rows[index].item.y), 0) / (rows.length - 1)
+    : 60;
+  const result: OcrLesson[] = [];
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const nextY = rows[index + 1]?.item.y ?? row.item.y + rowGap;
+    const bandTop = row.item.y - Math.max(row.item.height * 1.5, 8);
+    const bandBottom = nextY - Math.max(row.item.height * 0.25, 3);
+    const rowItems = items.filter(i => i.y >= bandTop && i.y < bandBottom && !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text));
+
+    const byDay = new Map<number, PositionedItem[]>();
+    for (const item of rowItems) {
+      const day = dayFromX(item.x, headers, imageWidth);
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day)!.push(item);
+    }
+
+    for (const [day, candidates] of byDay) {
+      const meaningful = candidates.filter(i => i.text.length > 1 || /[A-Za-z]/.test(i.text));
+      if (!meaningful.length) continue;
+      meaningful.sort((a, b) => a.y - b.y || a.x - b.x);
+      const room = meaningful.find(i => roomRe.test(i.text))?.text ?? null;
+      const nameParts = meaningful.filter(i => !roomRe.test(i.text) && !ignored.test(i.text));
+      if (!nameParts.length) continue;
+      const name = nameParts.map(i => i.text).join(' ').trim();
+      const end = index + 1 < rows.length ? rows[index + 1].time : addMinutes(row.time, 60);
+      if (row.time < end) result.push({ day, start: row.time, end, name, room });
+    }
+  }
+
+  return uniqueLessons(result);
+}
+
+export function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[] {
+  const usable = normalizeItems(items);
+  const headers = usable.flatMap(i => {
+    const text = i.text.toLowerCase();
+    const day = daysOfWeek.findIndex(d => text.startsWith(d) || text.includes(d));
+    return day >= 0 ? [{ day: day + 1, x: i.x }] : [];
+  });
+
+  const rangeLessons = parseRangeLayout(usable, headers, imageWidth);
+  const gridLessons = parseGridLayout(usable, headers, imageWidth);
+  return uniqueLessons([...rangeLessons, ...gridLessons]);
 }
 
 export type OcrEngine = {
-  predict: (image: Blob) => Promise<Array<{ image: { width: number; height: number }; items: OcrItem[] }>>;
+  predict: (image: Blob, params?: Record<string, unknown>) => Promise<Array<{ image: { width: number; height: number }; items: OcrItem[] }>>;
   dispose?: () => void;
 };
 
 let enginePromise: Promise<OcrEngine> | null = null;
 
-// Loaded lazily and cached — the model is a multi-MB download, so only fetch it once per session.
 export function loadOcrEngine(): Promise<OcrEngine> {
   if (!enginePromise) {
     enginePromise = (async () => {
-      // esm.sh injects its own Node.js polyfills (via unenv) into the bundle it serves, which is
-      // baked into the fetched module itself — deleting window.process has no effect on it.
-      // Forcing the "browser" export condition makes esm.sh resolve onnxruntime-web's real
-      // browser/WASM entry point instead of a Node-shaped bundle that calls process.binding().
-      const globalWithProcess = globalThis as unknown as { process?: unknown };
-      if (typeof globalWithProcess.process !== 'undefined') {
-        try { delete globalWithProcess.process; } catch { globalWithProcess.process = undefined; }
-      }
       const paddleOcrUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle&target=es2022&conditions=browser';
       const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
-      return PaddleOCR.create({ lang: 'en', ocrVersion: 'PP-OCRv5', ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/', numThreads: 2, simd: true } });
+      return PaddleOCR.create({
+        lang: 'en',
+        ocrVersion: 'PP-OCRv5',
+        worker: true,
+        ortOptions: {
+          backend: 'wasm',
+          wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
+          numThreads: 2,
+          simd: true,
+        },
+      });
     })().catch(e => { enginePromise = null; throw e; });
   }
   return enginePromise;
@@ -81,8 +167,9 @@ export function loadOcrEngine(): Promise<OcrEngine> {
 
 export async function scanTimetableImage(file: Blob): Promise<OcrLesson[]> {
   const ocr = await loadOcrEngine();
-  const [result] = await ocr.predict(file);
+  const [result] = await ocr.predict(file, { textDetLimitSideLen: 1600, textRecScoreThresh: 0.25 });
+  if (!result) throw new Error('OCR returned no result. Please try the screenshot again.');
   const lessons = parseTimetable(result.items, result.image.width);
-  if (!lessons.length) throw new Error('Could not confidently find timetable cells in that screenshot. Try a clearer image, or add lessons manually below.');
+  if (!lessons.length) throw new Error(`OCR detected ${result.items.length} text regions, but could not map them to timetable lessons. Try a clearer screenshot or add lessons manually.`);
   return lessons;
 }

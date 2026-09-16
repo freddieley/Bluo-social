@@ -68,38 +68,94 @@ function Quickstart({ step, setStep, openTimetable, close }: { step: number; set
 }
 
 function TimetableManager({ sb, user, close }: { sb: SupabaseClient; user: User; close: () => void }) {
-  const [lessons, setLessons] = useState<DraftLesson[]>([]); const [day, setDay] = useState(1); const [name, setName] = useState(''); const [start, setStart] = useState('09:00'); const [end, setEnd] = useState('10:00'); const [room, setRoom] = useState(''); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [scanning, setScanning] = useState(false); const [message, setMessage] = useState(''); const [imageUrl, setImageUrl] = useState<string | null>(null);
-  useEffect(() => { void getTimetable(sb, user.id).then(rows => setLessons(rows.map(l => ({ day: l.day, start: l.start_time.slice(0, 5), end: l.end_time.slice(0, 5), name: l.subject, room: l.room ?? undefined })))).catch(() => setMessage('Could not load your timetable.')).finally(() => setLoading(false)); }, [sb, user.id]);
+  const [lessons, setLessons] = useState<DraftLesson[]>([]);
+  const [day, setDay] = useState(1);
+  const [name, setName] = useState('');
+  const [start, setStart] = useState('09:00');
+  const [end, setEnd] = useState('10:00');
+  const [room, setRoom] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [message, setMessage] = useState('');
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getTimetable(sb, user.id)
+      .then(rows => setLessons(rows.map(l => ({ day: l.day, start: l.start_time.slice(0, 5), end: l.end_time.slice(0, 5), name: l.subject, room: l.room ?? undefined }))))
+      .catch(() => setMessage('Could not load your timetable.'))
+      .finally(() => setLoading(false));
+  }, [sb, user.id]);
+
   useEffect(() => () => { if (imageUrl) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
-  const add = () => { if (!name.trim() || end <= start) { setMessage('Add a subject and make sure the end time is after the start time.'); return; } setLessons(prev => [...prev, { day, start, end, name: name.trim(), room: room.trim() || undefined }].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start))); setName(''); setRoom(''); setMessage(''); };
+
+  const add = () => {
+    if (!name.trim() || end <= start) { setMessage('Add a subject and make sure the end time is after the start time.'); return; }
+    setLessons(prev => [...prev, { day, start, end, name: name.trim(), room: room.trim() || undefined }].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start)));
+    setName(''); setRoom(''); setMessage('');
+  };
+
   const remove = (index: number) => setLessons(prev => prev.filter((_, i) => i !== index));
+
+  const updateLesson = (index: number, patch: Partial<DraftLesson>) => {
+    setLessons(prev => prev.map((lesson, i) => i === index ? { ...lesson, ...patch } : lesson));
+  };
+
   const chooseScreenshot = async (file: File | undefined) => {
     if (!file) return;
     if (file.size > 6 * 1024 * 1024) { setMessage('Please use an image under 6 MB.'); return; }
+    if (!file.type.startsWith('image/')) { setMessage('Please upload a timetable image.'); return; }
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     setImageUrl(URL.createObjectURL(file));
     setScanning(true); setMessage('Reading your timetable on this device…');
     try {
       const detected = await scanTimetableImage(file);
       setLessons(prev => {
-        const merged = [...prev];
-        for (const d of detected) if (!merged.some(l => l.day === d.day && l.start === d.start && l.end === d.end && l.name === d.name)) merged.push({ day: d.day, start: d.start, end: d.end, name: d.name, room: d.room ?? undefined });
+        const existing = prev.filter(l => !l.id);
+        const merged = [...existing];
+        for (const d of detected) {
+          if (!merged.some(l => l.day === d.day && l.start === d.start && l.end === d.end && l.name.toLowerCase() === d.name.toLowerCase())) {
+            merged.push({ day: d.day, start: d.start, end: d.end, name: d.name, room: d.room ?? undefined });
+          }
+        }
         return merged.sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
       });
-      setMessage(`Found ${detected.length} lesson${detected.length === 1 ? '' : 's'}. Check them below, then save.`);
+      setMessage(`Found ${detected.length} lesson${detected.length === 1 ? '' : 's'}. Review the detected lessons below before saving.`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Could not scan the timetable.');
     } finally {
       setScanning(false);
     }
   };
-  const save = async () => { setSaving(true); setMessage(''); try { await replaceTimetable(sb, user.id, lessons); setMessage('Timetable saved.'); } catch (e) { setMessage(e instanceof Error ? e.message : 'Could not save timetable.'); } finally { setSaving(false); } };
+
+  const save = async () => {
+    const invalid = lessons.some(l => !l.name.trim() || l.end <= l.start || l.day < 1 || l.day > 5);
+    if (invalid) { setMessage('Check the highlighted lesson details before saving.'); return; }
+    setSaving(true); setMessage('');
+    try { await replaceTimetable(sb, user.id, lessons); setMessage('Timetable saved.'); }
+    catch (e) { setMessage(e instanceof Error ? e.message : 'Could not save timetable.'); }
+    finally { setSaving(false); }
+  };
+
   return <div className="quickstart-backdrop" role="dialog" aria-modal="true" aria-label="Timetable"><div className="timetable-modal">
     <div className="sheet-head"><div><div className="eyebrow">Your schedule</div><h2>Timetable</h2><p>Add, change or remove lessons whenever you need.</p></div><button className="icon-btn" onClick={close} aria-label="Close timetable"><X size={18} /></button></div>
-    <div className="timetable-tools"><label className="upload-control">{scanning ? <Loader2 size={16} /> : <Upload size={16} />} {scanning ? 'Scanning…' : 'Upload timetable screenshot'}<input type="file" accept="image/*" disabled={scanning} onChange={e => void chooseScreenshot(e.target.files?.[0])} /></label><span className="person-meta">Lessons are detected automatically — manual editing is always available.</span></div>
+    <div className="timetable-tools"><label className="upload-control">{scanning ? <Loader2 size={16} /> : <Upload size={16} />} {scanning ? 'Scanning…' : 'Upload timetable screenshot'}<input type="file" accept="image/*" disabled={scanning} onChange={e => void chooseScreenshot(e.target.files?.[0])} /></label><span className="person-meta">Lessons are detected automatically — review and edit them before saving.</span></div>
     {imageUrl && <div className="timetable-image-wrap"><img src={imageUrl} alt="Uploaded timetable reference" /><button className="secondary" onClick={() => setImageUrl(null)}>Remove screenshot</button></div>}
     <div className="lesson-form"><select className="input" value={day} onChange={e => setDay(Number(e.target.value))}>{days.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}</select><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Subject" maxLength={80} /><input className="input" type="time" value={start} onChange={e => setStart(e.target.value)} /><input className="input" type="time" value={end} onChange={e => setEnd(e.target.value)} /><input className="input" value={room} onChange={e => setRoom(e.target.value)} placeholder="Room (optional)" maxLength={40} /><button className="primary" onClick={add}><Plus size={16} /> Add lesson</button></div>
-    <div className="lesson-list">{loading ? <p className="person-meta">Loading timetable…</p> : lessons.length ? lessons.map((l, i) => <div className="lesson-editor-row" key={`${l.day}-${l.start}-${l.name}-${i}`}><div className="time">{days[l.day - 1]?.slice(0, 3)}<br />{l.start}</div><div className="lesson"><b>{l.name}</b><span>{l.start}–{l.end} · {l.room || 'No room'}</span></div><button className="secondary delete-lesson" onClick={() => remove(i)}>Remove</button></div>) : <div className="notice"><Clock3 size={15} /> No lessons yet. Add them above or use your timetable screenshot as a reference.</div>}</div>
-    {message && <div className="notice" style={{ marginTop: 12 }}>{message}</div>}<div className="sheet-actions"><button className="secondary" onClick={close}>Close</button><button className="primary" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save timetable'}</button></div>
+    <div className="lesson-list">
+      {loading ? <p className="person-meta">Loading timetable…</p> : lessons.length ? lessons.map((l, i) => <div className="lesson-editor-row" key={`${l.day}-${l.start}-${l.name}-${i}`}>
+        <div className="time">{days[l.day - 1]?.slice(0, 3)}<br />{l.start}</div>
+        <div className="lesson-edit-fields">
+          <select className="input" value={l.day} onChange={e => updateLesson(i, { day: Number(e.target.value) })}>{days.map((d, dayIndex) => <option key={d} value={dayIndex + 1}>{d}</option>)}</select>
+          <input className="input" value={l.name} onChange={e => updateLesson(i, { name: e.target.value })} placeholder="Subject" maxLength={80} />
+          <input className="input" type="time" value={l.start} onChange={e => updateLesson(i, { start: e.target.value })} />
+          <input className="input" type="time" value={l.end} onChange={e => updateLesson(i, { end: e.target.value })} />
+          <input className="input" value={l.room || ''} onChange={e => updateLesson(i, { room: e.target.value || undefined })} placeholder="Room" maxLength={40} />
+        </div>
+        <button className="secondary delete-lesson" onClick={() => remove(i)}>Remove</button>
+      </div>) : <div className="notice"><Clock3 size={15} /> No lessons yet. Add them above or upload your timetable screenshot.</div>}
+    </div>
+    {message && <div className="notice" style={{ marginTop: 12 }}>{message}</div>}
+    <div className="sheet-actions"><button className="secondary" onClick={close}>Close</button><button className="primary" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save timetable'}</button></div>
   </div></div>;
 }
