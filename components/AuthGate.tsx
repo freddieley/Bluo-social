@@ -87,7 +87,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
       const cleanEmail = email.trim().toLowerCase();
       if (!USERNAME_RE.test(cleanUsername)) throw new Error('Choose a username with 3–20 letters, numbers, or underscores.');
-      if (!parseCollegeEmail(cleanEmail)) throw new Error('Use your PSC email, e.g. fley26@students.psc.ac.uk.');
+      if (!parseCollegeEmail(cleanEmail)) throw new Error('Use your PSC student email.');
       if (!name.trim()) throw new Error('Add your real name first.');
       if (!Number.isInteger(yearGroup) || yearGroup < 2027 || yearGroup > 2040) throw new Error('Choose your graduation year.');
 
@@ -118,19 +118,19 @@ export function AuthGate({ children }: AuthGateProps) {
           <label className="control-label">Your real name</label>
           <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Your real name" autoComplete="name" />
           <label className="control-label">Username</label>
-          <input className="input" value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="e.g. freddie_ley" autoComplete="username" maxLength={20} />
+          <input className="input" value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="" autoComplete="username" maxLength={20} />
           <div className="notice" style={{ marginTop: 8 }}>Your username is how you will sign back in. It can use letters, numbers and underscores.</div>
           <label className="control-label">Graduation year</label>
           <select className="input" value={yearGroup} onChange={e => setYearGroup(Number(e.target.value))}>{Array.from({ length: 14 }, (_, i) => 2027 + i).map(y => <option value={y} key={y}>{y}</option>)}</select>
           <label className="control-label">PSC launch code</label>
           <input className="input" value={accessCode} onChange={e => setAccessCode(e.target.value)} placeholder="Launch code" autoComplete="off" />
           <label className="control-label">PSC student email</label>
-          <input className="input" value={email} onChange={e => setEmail(e.target.value)} placeholder="fley26@students.psc.ac.uk" inputMode="email" autoComplete="email" />
+          <input className="input" value={email} onChange={e => setEmail(e.target.value)} placeholder="Student email" inputMode="email" autoComplete="email" />
         </>}
 
         {mode === 'login' && <>
           <label className="control-label">Bluo username</label>
-          <input className="input" value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="your_username" inputMode="text" autoComplete="username" maxLength={20} />
+          <input className="input" value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="" inputMode="text" autoComplete="username" maxLength={20} />
         </>}
 
         <label className="control-label">Password</label>
