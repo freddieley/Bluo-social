@@ -113,7 +113,7 @@ export function AuthGate() {
         </>}
 
         {mode === 'login' && <>
-          <label className="control-label">Bl​​uo username</label>
+          <label className="control-label">Bluo username</label>
           <input className="input" value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="your_username" inputMode="text" autoComplete="username" maxLength={20} />
         </>}
 
