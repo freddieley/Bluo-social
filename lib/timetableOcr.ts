@@ -9,6 +9,14 @@ const ignored = /^(break|study period|lunch|free|lesson|monday(?:\s+\d+)?|tuesda
 const rangeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\s*[-–—]\s*(\d{1,2})\s*:\s*([0-5]\d)\b/;
 const singleTimeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\b/;
 const roomRe = /(?:^|\s)([A-Z]{1,5}\d{2,4}[A-Z]?)$/i;
+const teacherNameWordRe = /^(?:[A-Z]\.?|[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?)$/;
+const subjectWords = new Set([
+  'math', 'maths', 'mathematics', 'further', 'physics', 'chemistry', 'biology', 'science',
+  'computer', 'computing', 'english', 'literature', 'history', 'geography', 'psychology',
+  'economics', 'politics', 'sociology', 'business', 'french', 'german', 'spanish', 'latin',
+  'greek', 'art', 'music', 'drama', 'sport', 'sports', 'physical', 'education', 'engineering',
+  'workshop', 'compulsory', 'tutorial', 'study', 'development', 'religious', 'media', 'design',
+]);
 
 function box(item: OcrItem) {
   const xs = item.poly.flatMap(p => [p[0]]);
@@ -58,6 +66,15 @@ function normalizeText(text: string) {
 
 function lessonTokens(lesson: OcrLesson) {
   return new Set(normalizeText(lesson.name).split(/\s+/).filter(token => token.length > 1));
+}
+
+function looksLikeTeacherName(text: string) {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length < 2 || words.length > 3) return false;
+  if (!words.every(word => teacherNameWordRe.test(word))) return false;
+  if (words.some(word => subjectWords.has(word.toLowerCase()))) return false;
+  return true;
 }
 
 function extractRoom(text: string) {
@@ -113,11 +130,6 @@ function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
 
   const result: OcrLesson[] = [];
   for (const lesson of sorted) {
-    // OCR can recognise the same real lesson twice with different end times.
-    // This happens with double lessons when one OCR path sees the first period
-    // boundary (e.g. 11:10–12:05) and another sees the full block (11:10–13:00).
-    // If the day/start match and the lesson identity matches, keep one lesson
-    // and use the furthest end time.
     const sameStartIndex = result.findIndex(existing =>
       existing.day === lesson.day &&
       existing.start === lesson.start &&
@@ -129,8 +141,6 @@ function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
       continue;
     }
 
-    // Exact duplicate with the same slot is covered even when OCR produced a
-    // slightly different subject string that still maps to the same room.
     const sameSlotIndex = result.findIndex(existing =>
       existing.day === lesson.day &&
       existing.start === lesson.start &&
@@ -145,8 +155,6 @@ function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
       }
     }
 
-    // Merge genuine adjacent periods when the OCR has split a double lesson
-    // into two consecutive blocks and both blocks describe the same lesson.
     const previous = result[result.length - 1];
     if (
       previous &&
@@ -232,6 +240,7 @@ function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
       .filter(i => dayFromX(i.x, columns) === day)
       .filter(i => i.y > currentBottom + Math.max(3, current.item.height * 0.25) && i.y < nextTop - 2)
       .filter(i => !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text))
+      .filter(i => !looksLikeTeacherName(i.text))
       .sort((a, b) => a.y - b.y || a.x - b.x);
 
     if (!candidates.length) continue;
@@ -279,7 +288,26 @@ function parseGridLayout(items: PositionedItem[], columns: Column[]): OcrLesson[
     }
 
     for (const [day, candidates] of byDay) {
-      const meaningful = candidates.filter(i => i.text.length > 1 || /[A-Za-z]/.test(i.text));
+      const meaningful = candidates.filter(i => (i.text.length > 1 || /[A-Za-z]/.test(i.text)) && !looksLikeTeacherName(i.text));
+      const teacherCandidates = candidates.filter(i => looksLikeTeacherName(i.text));
+      const end = index + 1 < rows.length ? rows[index + 1].time : addMinutes(row.time, 60);
+
+      // A common timetable layout places the teacher's name in the second
+      // period of a double lesson. If that row contains only a teacher name,
+      // it is metadata for the preceding lesson, not a new subject.
+      if (!meaningful.length && teacherCandidates.length && result.length) {
+        const previous = [...result].reverse().find(lesson => lesson.day === day);
+        if (
+          previous &&
+          previous.end === row.time &&
+          lessonMinutes(previous.start, previous.end) <= 60 &&
+          row.time < end
+        ) {
+          previous.end = end;
+          continue;
+        }
+      }
+
       if (!meaningful.length) continue;
       meaningful.sort((a, b) => a.y - b.y || a.x - b.x);
 
@@ -295,7 +323,6 @@ function parseGridLayout(items: PositionedItem[], columns: Column[]): OcrLesson[
 
       if (!nameParts.length) continue;
       const name = nameParts.join(' ').replace(/\s+/g, ' ').trim();
-      const end = index + 1 < rows.length ? rows[index + 1].time : addMinutes(row.time, 60);
       if (row.time < end) result.push({ day, start: row.time, end, name, room });
     }
   }
