@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, MapPin, Minus, Navigation, Plus } from 'lucide-react';
 import type { Person } from '@/lib/types';
 
-const CAMPUS_CENTER: [number, number] = [51.0665, -1.3284];
+// Peter Symonds College (Owens Road) — use the campus itself as the initial map centre.
+// The previous value was ~700m southwest of the college, which made the map look offset.
+const CAMPUS_CENTER: [number, number] = [51.0707, -1.32383];
 const DEFAULT_ZOOM = 16;
 const MIN_ZOOM = 12;
 const MAX_ZOOM = 19;
