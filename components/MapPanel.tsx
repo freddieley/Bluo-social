@@ -102,7 +102,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
         zoom: 16.2,
         minZoom: 14,
         maxZoom: 19,
-        attributionControl: true,
+        attributionControl: { compact: true },
       });
       mapRef.current = map;
       map.on('load', () => {
