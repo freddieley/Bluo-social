@@ -273,8 +273,8 @@ function parseGridLayout(items: PositionedItem[], columns: Column[]): OcrLesson[
         .filter((x): x is { item: PositionedItem; itemIndex: number; room: string } => Boolean(x.room));
       const roomCandidate = roomCandidates[0];
       const room = roomCandidate?.room ?? null;
-      const nameParts = meaningful
-        .filter((item) => item !== roomCandidate?.item)
+      const roomIndex = roomCandidate?.itemIndex ?? -1;
+      const nameParts = (roomIndex >= 0 ? meaningful.slice(0, roomIndex) : meaningful.slice(0, Math.min(2, meaningful.length)))
         .map(item => stripRoom(item.text, extractRoom(item.text)))
         .filter(Boolean);
 
