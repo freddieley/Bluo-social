@@ -9,51 +9,15 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Wire creator and styles
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          app = Path('components/BluoApp.tsx')
-          text = app.read_text()
-          import_line = "import { AvatarCreator } from './AvatarCreator';"
-          if import_line not in text:
-              text = text.replace("import { Avatar } from './Avatar';", "import { Avatar } from './Avatar';\n" + import_line, 1)
-          old = "{type === 'avatar' && <AvatarEditor config={profile} setConfig={setProfile} close={close} />}"
-          new = "{type === 'avatar' && <AvatarCreator config={profile} setConfig={setProfile} close={close} />}"
-          if old in text:
-              text = text.replace(old, new, 1)
-          app.write_text(text)
-
-          css = Path('app/globals.css')
-          styles = r'''
-
-/* Visual avatar creator */
-.avatar-creator{display:flex;flex-direction:column;gap:16px}.avatar-creator-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.avatar-creator-head h2{margin:3px 0 4px}.avatar-creator-head p{margin:0;max-width:470px}.avatar-creator-spark{width:40px;height:40px;border-radius:14px;background:#eaf3ff;color:var(--blue);display:grid;place-items:center;flex:none}.avatar-creator-stage{display:flex;align-items:center;gap:18px;padding:14px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,#f5faff,#fff);min-height:178px}.avatar-creator-preview{flex:none;display:grid;place-items:center}.avatar-creator-preview-copy{display:flex;flex-direction:column;gap:4px}.avatar-creator-preview-copy b{font-family:'Plus Jakarta Sans';font-size:15px}.avatar-creator-preview-copy span{font-size:11px;color:var(--muted);line-height:1.45}.avatar-tabs{display:flex;gap:5px;padding:5px;background:#f2f6fb;border-radius:16px;overflow:auto}.avatar-tab{flex:1;min-width:max-content;padding:9px 10px;border-radius:11px;background:transparent;color:#7183a3;font-size:11px;font-weight:800}.avatar-tab.active{background:#fff;color:var(--blue);box-shadow:0 4px 14px rgba(20,77,145,.08)}.avatar-option-panel{min-height:170px}.avatar-choice-section{display:flex;flex-direction:column;gap:9px}.avatar-choice-title{font-size:11px;font-weight:800;color:#7183a3}.avatar-choice-grid{display:grid;gap:8px}.avatar-choice{position:relative;border:1px solid var(--line);background:#f8faff;border-radius:17px;padding:8px 5px 9px;display:flex;flex-direction:column;align-items:center;gap:5px;transition:transform .12s ease,border-color .12s ease,background .12s ease}.avatar-choice:hover{transform:translateY(-1px)}.avatar-choice.selected{border-color:#79b6ff;background:#eef6ff;box-shadow:inset 0 0 0 1px #79b6ff}.avatar-choice-art{width:100%;display:grid;place-items:center}.avatar-choice-art svg{width:82px;height:82px;border-radius:22px}.avatar-choice-label{font-size:10px;font-weight:800;color:#536b8e;text-align:center}.avatar-choice-check{position:absolute;right:7px;top:7px;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center}.colour-choice-list{display:flex;flex-direction:column;gap:8px}.colour-choice-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 12px;border:1px solid var(--line);background:#f8faff;border-radius:15px}.colour-choice-row>div:first-child{display:flex;flex-direction:column;gap:2px}.colour-choice-row b{font-size:11px}.colour-choice-row span{font-size:10px;color:var(--muted)}.colour-choice-swatches{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.colour-choice-swatch{width:27px;height:27px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #dce4ef}.colour-choice-swatch.selected{box-shadow:0 0 0 2px var(--blue)}.avatar-creator-actions{display:flex;gap:10px}.avatar-creator-actions>*{flex:1;display:flex;align-items:center;justify-content:center;gap:6px}
-@media(max-width:560px){.avatar-creator-stage{min-height:154px;padding:10px}.avatar-creator-preview svg{width:150px;height:150px}.avatar-creator-preview-copy{display:none}.avatar-choice-grid{grid-template-columns:repeat(3,minmax(0,1fr)) !important}.avatar-choice-art svg{width:68px;height:68px}.avatar-tabs{margin-inline:-2px}.avatar-tab{padding-inline:8px}.colour-choice-row{align-items:flex-start;flex-direction:column}.colour-choice-swatches{justify-content:flex-start}}
-'''
-          css_text = css.read_text()
-          if '/* Visual avatar creator */' not in css_text:
-              css.write_text(css_text + styles)
-          PY
-      - name: Commit and push
+      - name: Wire creator
+        run: python -c "from pathlib import Path; p=Path('components/BluoApp.tsx'); s=p.read_text(); s=s.replace(\"import { Avatar } from './Avatar';\", \"import { Avatar } from './Avatar';\\nimport { AvatarCreator } from './AvatarCreator';\", 1); s=s.replace(\"{type === 'avatar' && <AvatarEditor config={profile} setConfig={setProfile} close={close} />}\", \"{type === 'avatar' && <AvatarCreator config={profile} setConfig={setProfile} close={close} />}\", 1); p.write_text(s)"
+      - name: Commit wiring
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add components/BluoApp.tsx app/globals.css
-          git diff --cached --quiet || git commit -m "Polish avatar creator UI"
+          git add components/BluoApp.tsx
+          git commit -m "Use visual avatar creator" || exit 0
           git push
-      - name: Remove temporary workflow
-        if: always()
-        run: |
-          git rm -f .github/workflows/avatar-ui-patch.yml || true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Remove temporary avatar patch workflow" || true
-          git push || true
