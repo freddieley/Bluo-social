@@ -71,10 +71,14 @@ function parseRangeLayout(items: PositionedItem[], headers: Array<{ day: number;
       .filter(i => i !== current.item && i.x > current.item.x - imageWidth * 0.08 && i.x < current.item.x + imageWidth * 0.08 && i.y > current.item.y + 8 && (!nextSameDay || i.y < nextSameDay.item.y - 5))
       .filter(i => !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text))
       .sort((a, b) => a.y - b.y);
-    const nameItem = candidates.find(i => !roomRe.test(i.text));
-    if (!nameItem) continue;
-    const roomItem = candidates.find(i => i !== nameItem && roomRe.test(i.text));
-    result.push({ day, start: current.time.start, end: current.time.end, name: nameItem.text, room: roomItem?.text || null });
+
+    const roomIndex = candidates.findIndex(i => roomRe.test(i.text));
+    const nameCandidates = roomIndex >= 0 ? candidates.slice(0, roomIndex) : candidates.slice(0, 1);
+    const roomItem = roomIndex >= 0 ? candidates[roomIndex] : undefined;
+    const name = nameCandidates.map(i => i.text).join(' ').trim();
+    if (!name) continue;
+
+    result.push({ day, start: current.time.start, end: current.time.end, name, room: roomItem?.text || null });
   }
 
   return uniqueLessons(result);
@@ -137,43 +141,37 @@ export function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[
   return uniqueLessons([...rangeLessons, ...gridLessons]);
 }
 
-export type OcrEngine = {
-  predict: (image: Blob, params?: Record<string, unknown>) => Promise<Array<{ image: { width: number; height: number }; items: OcrItem[] }>>;
-  dispose?: () => void;
-};
-
-let enginePromise: Promise<OcrEngine> | null = null;
-
-export function loadOcrEngine(): Promise<OcrEngine> {
-  if (!enginePromise) {
-    enginePromise = (async () => {
-      // Use jsDelivr's browser ESM build. The previous esm.sh bundle pulled a
-      // Node/unenv process shim into Safari/Next, causing process.binding() to
-      // throw before OCR could run. jsDelivr's +esm entry is browser-oriented
-      // and keeps the official PaddleOCR.js package intact.
-      const paddleOcrUrl = 'https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm';
-      const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
-      return PaddleOCR.create({
-        lang: 'en',
-        ocrVersion: 'PP-OCRv5',
-        worker: false,
-        ortOptions: {
-          backend: 'wasm',
-          wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
-          numThreads: 2,
-          simd: true,
-        },
-      });
-    })().catch(e => { enginePromise = null; throw e; });
-  }
-  return enginePromise;
-}
-
 export async function scanTimetableImage(file: Blob): Promise<OcrLesson[]> {
-  const ocr = await loadOcrEngine();
-  const [result] = await ocr.predict(file, { textDetLimitSideLen: 1600, textRecScoreThresh: 0.25 });
-  if (!result) throw new Error('OCR returned no result. Please try the screenshot again.');
-  const lessons = parseTimetable(result.items, result.image.width);
-  if (!lessons.length) throw new Error(`OCR detected ${result.items.length} text regions, but could not map them to timetable lessons. Try a clearer screenshot or add lessons manually.`);
+  const form = new FormData();
+  form.append('image', file, file instanceof File ? file.name : 'timetable-image');
+
+  let response: Response;
+  try {
+    response = await fetch('/api/timetable/ocr', {
+      method: 'POST',
+      body: form,
+      cache: 'no-store',
+    });
+  } catch {
+    throw new Error('Could not reach the timetable OCR service. Please check your connection and try again.');
+  }
+
+  let payload: { items?: OcrItem[]; image?: { width?: number; height?: number }; error?: string } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('The timetable OCR service returned an invalid response. Please try again.');
+  }
+
+  if (!response.ok) throw new Error(payload.error || 'Could not read the timetable. Please try again.');
+
+  const items = payload.items ?? [];
+  const imageWidth = Number(payload.image?.width ?? 0);
+  if (!items.length || !imageWidth) throw new Error('OCR returned no usable timetable text. Please try the screenshot again.');
+
+  const lessons = parseTimetable(items, imageWidth);
+  if (!lessons.length) {
+    throw new Error(`OCR detected ${items.length} text regions, but could not map them to timetable lessons. Please try a clearer screenshot or add lessons manually.`);
+  }
   return lessons;
 }
