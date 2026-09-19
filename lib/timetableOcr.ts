@@ -8,7 +8,7 @@ const daysOfWeek = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 const ignored = /^(break|study period|lunch|free|lesson|monday(?:\s+\d+)?|tuesday(?:\s+\d+)?|wednesday(?:\s+\d+)?|thursday(?:\s+\d+)?|friday(?:\s+\d+)?)$/i;
 const rangeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\s*[-–—]\s*(\d{1,2})\s*:\s*([0-5]\d)\b/;
 const singleTimeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\b/;
-const roomRe = /^(?:[A-Z]{1,5}\s*)?\d{2,4}[A-Z]?$|^[A-Z]{1,5}\d{2,4}[A-Z]?$/i;
+const roomRe = /(?:^|\s)([A-Z]{1,5}\d{2,4}[A-Z]?)$/i;
 
 function box(item: OcrItem) {
   const xs = item.poly.flatMap(p => [p[0]]);
@@ -46,10 +46,102 @@ function addMinutes(time: string, minutes: number) {
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function uniqueLessons(lessons: OcrLesson[]) {
-  return lessons
+function lessonMinutes(start: string, end: string) {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  return (eh * 60 + em) - (sh * 60 + sm);
+}
+
+function normalizeText(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function lessonTokens(lesson: OcrLesson) {
+  return new Set(normalizeText(lesson.name).split(/\s+/).filter(token => token.length > 1));
+}
+
+function extractRoom(text: string) {
+  const match = text.match(roomRe);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
+function stripRoom(text: string, room: string | null) {
+  if (!room) return text;
+  return text.replace(new RegExp(`(?:^|\\s)${room}\\s*$`, 'i'), '').trim();
+}
+
+function mergeLessonPair(a: OcrLesson, b: OcrLesson): OcrLesson {
+  const room = a.room || b.room;
+  const aName = stripRoom(a.name, a.room);
+  const bName = stripRoom(b.name, b.room);
+  const aTokens = lessonTokens({ ...a, name: aName });
+  const bTokens = lessonTokens({ ...b, name: bName });
+  const overlap = [...aTokens].filter(token => bTokens.has(token)).length;
+  const shorter = Math.min(aTokens.size, bTokens.size);
+  const related = aName.toLowerCase().includes(bName.toLowerCase())
+    || bName.toLowerCase().includes(aName.toLowerCase())
+    || (shorter > 0 && overlap >= Math.min(2, shorter))
+    || (a.room === b.room && room !== null && overlap > 0);
+
+  if (!related) return b;
+
+  const names = [aName, bName]
+    .filter(Boolean)
+    .sort((x, y) => y.length - x.length);
+  const name = names[0] ?? aName ?? bName;
+  return {
+    day: a.day,
+    start: a.start,
+    end: b.end,
+    name,
+    room,
+  };
+}
+
+function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
+  const sorted = lessons
     .filter(lesson => lesson.name.trim())
-    .filter((lesson, index, all) => all.findIndex(x => x.day === lesson.day && x.start === lesson.start && x.end === lesson.end && x.name === lesson.name) === index)
+    .sort((a, b) => a.day - b.day || a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+
+  const result: OcrLesson[] = [];
+  for (const lesson of sorted) {
+    const sameSlotIndex = result.findIndex(existing =>
+      existing.day === lesson.day &&
+      existing.start === lesson.start &&
+      existing.end === lesson.end,
+    );
+
+    if (sameSlotIndex >= 0) {
+      const existing = result[sameSlotIndex];
+      const merged = mergeLessonPair(existing, lesson);
+      result[sameSlotIndex] = merged === lesson ? existing : merged;
+      continue;
+    }
+
+    const previous = result[result.length - 1];
+    if (
+      previous &&
+      previous.day === lesson.day &&
+      previous.end === lesson.start &&
+      lessonMinutes(previous.start, previous.end) <= 60 &&
+      lessonMinutes(lesson.start, lesson.end) <= 60
+    ) {
+      const merged = mergeLessonPair(previous, lesson);
+      if (merged !== lesson) {
+        result[result.length - 1] = merged;
+        continue;
+      }
+    }
+
+    result.push(lesson);
+  }
+
+  return result;
+}
+
+function uniqueLessons(lessons: OcrLesson[]) {
+  return collapseDuplicateAndDoubleLessons(lessons)
+    .filter((lesson, index, all) => all.findIndex(x => x.day === lesson.day && x.start === lesson.start && x.end === lesson.end && x.name === lesson.name && x.room === lesson.room) === index)
     .sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
 }
 
@@ -123,15 +215,12 @@ function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
 
     if (!candidates.length) continue;
 
-    const roomIndex = candidates.findIndex(i => roomRe.test(i.text.replace(/\s+/g, ' ').trim()));
+    const roomIndex = candidates.findIndex(i => extractRoom(i.text));
     const roomItem = roomIndex >= 0 ? candidates[roomIndex] : undefined;
     const nameCandidates = roomIndex >= 0
       ? candidates.slice(0, roomIndex)
       : candidates.slice(0, Math.min(2, candidates.length));
-
-    // OCR can split a subject over several visual lines. Preserve all text up
-    // to the room line instead of silently dropping the continuation.
-    const name = nameCandidates.map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
+    const name = nameCandidates.map(i => stripRoom(i.text, extractRoom(i.text))).join(' ').replace(/\s+/g, ' ').trim();
     if (!name) continue;
 
     result.push({
@@ -139,7 +228,7 @@ function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
       start: current.time.start,
       end: current.time.end,
       name,
-      room: roomItem?.text.replace(/\s+/g, ' ').trim() || null,
+      room: roomItem ? extractRoom(roomItem.text) : null,
     });
   }
 
@@ -178,10 +267,19 @@ function parseGridLayout(items: PositionedItem[], columns: Column[]): OcrLesson[
       const meaningful = candidates.filter(i => i.text.length > 1 || /[A-Za-z]/.test(i.text));
       if (!meaningful.length) continue;
       meaningful.sort((a, b) => a.y - b.y || a.x - b.x);
-      const room = meaningful.find(i => roomRe.test(i.text))?.text ?? null;
-      const nameParts = meaningful.filter(i => !roomRe.test(i.text) && !ignored.test(i.text));
+
+      const roomCandidates = meaningful
+        .map((item, itemIndex) => ({ item, itemIndex, room: extractRoom(item.text) }))
+        .filter((x): x is { item: PositionedItem; itemIndex: number; room: string } => Boolean(x.room));
+      const roomCandidate = roomCandidates[0];
+      const room = roomCandidate?.room ?? null;
+      const nameParts = meaningful
+        .filter((item) => item !== roomCandidate?.item)
+        .map(item => stripRoom(item.text, extractRoom(item.text)))
+        .filter(Boolean);
+
       if (!nameParts.length) continue;
-      const name = nameParts.map(i => i.text).join(' ').trim();
+      const name = nameParts.join(' ').replace(/\s+/g, ' ').trim();
       const end = index + 1 < rows.length ? rows[index + 1].time : addMinutes(row.time, 60);
       if (row.time < end) result.push({ day, start: row.time, end, name, room });
     }
