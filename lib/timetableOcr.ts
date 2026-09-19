@@ -2,11 +2,12 @@ export type OcrItem = { text: string; score?: number; poly: number[][] };
 export type OcrLesson = { day: number; start: string; end: string; name: string; room: string | null };
 
 type PositionedItem = OcrItem & { x: number; y: number; width: number; height: number };
+type Column = { day: number; x: number };
 
 const daysOfWeek = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-const ignored = /^(break|study period|lunch|free|lesson|monday|tuesday|wednesday|thursday|friday)$/i;
-const rangeRe = /\b(\d{1,2}):([0-5]\d)\s*[-–—]\s*(\d{1,2}):([0-5]\d)\b/;
-const singleTimeRe = /\b(\d{1,2}):([0-5]\d)\b/;
+const ignored = /^(break|study period|lunch|free|lesson|monday(?:\s+\d+)?|tuesday(?:\s+\d+)?|wednesday(?:\s+\d+)?|thursday(?:\s+\d+)?|friday(?:\s+\d+)?)$/i;
+const rangeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\s*[-–—]\s*(\d{1,2})\s*:\s*([0-5]\d)\b/;
+const singleTimeRe = /\b(\d{1,2})\s*:\s*([0-5]\d)\b/;
 const roomRe = /^(?:[A-Z]{1,5}\s*)?\d{2,4}[A-Z]?$|^[A-Z]{1,5}\d{2,4}[A-Z]?$/i;
 
 function box(item: OcrItem) {
@@ -45,12 +46,6 @@ function addMinutes(time: string, minutes: number) {
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
-function dayFromX(x: number, headers: Array<{ day: number; x: number }>, width: number) {
-  if (headers.length) return headers.reduce((best, h) => Math.abs(h.x - x) < Math.abs(best.x - x) ? h : best).day;
-  const left = width * 0.06, right = width * 0.995;
-  return Math.min(5, Math.max(1, Math.floor(((x - left) / (right - left)) * 5) + 1));
-}
-
 function uniqueLessons(lessons: OcrLesson[]) {
   return lessons
     .filter(lesson => lesson.name.trim())
@@ -58,33 +53,100 @@ function uniqueLessons(lessons: OcrLesson[]) {
     .sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
 }
 
-function parseRangeLayout(items: PositionedItem[], headers: Array<{ day: number; x: number }>, imageWidth: number) {
-  const ranges = items.map(i => ({ item: i, time: parseTimeRange(i.text) })).filter((x): x is { item: PositionedItem; time: { start: string; end: string } } => Boolean(x.time));
+function detectColumns(items: PositionedItem[], headers: Column[], imageWidth: number): Column[] {
+  const explicit = headers
+    .filter((header, index, all) => all.findIndex(h => h.day === header.day) === index)
+    .sort((a, b) => a.day - b.day);
+  if (explicit.length >= 3) return explicit;
+
+  const rangeXs = items
+    .filter(item => parseTimeRange(item.text))
+    .map(item => item.x)
+    .sort((a, b) => a - b);
+
+  // Timetables normally have one or more range anchors per day. Cluster those
+  // anchors by the largest horizontal gaps so OCR does not need to preserve the
+  // exact day-header text to recover the five columns.
+  const uniqueXs = rangeXs.filter((x, index, all) => index === 0 || Math.abs(x - all[index - 1]) > imageWidth * 0.025);
+  if (uniqueXs.length >= 3) {
+    const gaps = uniqueXs.slice(1).map((x, index) => ({ gap: x - uniqueXs[index], index }));
+    const cuts = gaps.sort((a, b) => b.gap - a.gap).slice(0, Math.min(4, uniqueXs.length - 1)).map(g => g.index).sort((a, b) => a - b);
+    const groups: number[][] = [];
+    let start = 0;
+    for (const cut of cuts) {
+      groups.push(uniqueXs.slice(start, cut + 1));
+      start = cut + 1;
+    }
+    groups.push(uniqueXs.slice(start));
+    if (groups.length >= 3) {
+      return groups.slice(0, 5).map((group, index) => ({ day: index + 1, x: group.reduce((sum, x) => sum + x, 0) / group.length }));
+    }
+  }
+
+  const left = imageWidth * 0.06;
+  const right = imageWidth * 0.995;
+  return Array.from({ length: 5 }, (_, index) => ({
+    day: index + 1,
+    x: left + ((index + 0.5) / 5) * (right - left),
+  }));
+}
+
+function dayFromX(x: number, columns: Column[]) {
+  return columns.reduce((best, column) => Math.abs(column.x - x) < Math.abs(best.x - x) ? column : best).day;
+}
+
+function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
+  const ranges = items
+    .map(item => ({ item, time: parseTimeRange(item.text) }))
+    .filter((x): x is { item: PositionedItem; time: { start: string; end: string } } => Boolean(x.time))
+    .sort((a, b) => a.item.y - b.item.y);
+
   const result: OcrLesson[] = [];
-
   for (const current of ranges) {
-    const day = dayFromX(current.item.x, headers, imageWidth);
-    const nextSameDay = ranges
-      .filter(r => r !== current && dayFromX(r.item.x, headers, imageWidth) === day && r.item.y > current.item.y)
-      .sort((a, b) => a.item.y - b.item.y)[0];
-    const candidates = items
-      .filter(i => i !== current.item && i.x > current.item.x - imageWidth * 0.08 && i.x < current.item.x + imageWidth * 0.08 && i.y > current.item.y + 8 && (!nextSameDay || i.y < nextSameDay.item.y - 5))
-      .filter(i => !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text))
-      .sort((a, b) => a.y - b.y);
+    const day = dayFromX(current.item.x, columns);
+    const sameDayRanges = ranges
+      .filter(r => r !== current && dayFromX(r.item.x, columns) === day)
+      .sort((a, b) => a.item.y - b.item.y);
+    const nextSameDay = sameDayRanges.find(r => r.item.y > current.item.y);
+    const currentBottom = current.item.y + current.item.height / 2;
+    const nextTop = nextSameDay ? nextSameDay.item.y - nextSameDay.item.height / 2 : Number.POSITIVE_INFINITY;
 
-    const roomIndex = candidates.findIndex(i => roomRe.test(i.text));
-    const nameCandidates = roomIndex >= 0 ? candidates.slice(0, roomIndex) : candidates.slice(0, 1);
+    // Assign by column rather than a fixed percentage around the time label.
+    // Subject/room text can be substantially indented or aligned differently
+    // between timetable providers.
+    const candidates = items
+      .filter(i => i !== current.item)
+      .filter(i => dayFromX(i.x, columns) === day)
+      .filter(i => i.y > currentBottom + Math.max(3, current.item.height * 0.25) && i.y < nextTop - 2)
+      .filter(i => !parseTime(i.text) && !parseTimeRange(i.text) && !ignored.test(i.text))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+
+    if (!candidates.length) continue;
+
+    const roomIndex = candidates.findIndex(i => roomRe.test(i.text.replace(/\s+/g, ' ').trim()));
     const roomItem = roomIndex >= 0 ? candidates[roomIndex] : undefined;
-    const name = nameCandidates.map(i => i.text).join(' ').trim();
+    const nameCandidates = roomIndex >= 0
+      ? candidates.slice(0, roomIndex)
+      : candidates.slice(0, Math.min(2, candidates.length));
+
+    // OCR can split a subject over several visual lines. Preserve all text up
+    // to the room line instead of silently dropping the continuation.
+    const name = nameCandidates.map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
     if (!name) continue;
 
-    result.push({ day, start: current.time.start, end: current.time.end, name, room: roomItem?.text || null });
+    result.push({
+      day,
+      start: current.time.start,
+      end: current.time.end,
+      name,
+      room: roomItem?.text.replace(/\s+/g, ' ').trim() || null,
+    });
   }
 
   return uniqueLessons(result);
 }
 
-function parseGridLayout(items: PositionedItem[], headers: Array<{ day: number; x: number }>, imageWidth: number): OcrLesson[] {
+function parseGridLayout(items: PositionedItem[], columns: Column[]): OcrLesson[] {
   const timeLabels = items
     .map(item => ({ item, time: parseTime(item.text) }))
     .filter((x): x is { item: PositionedItem; time: string } => Boolean(x.time))
@@ -107,7 +169,7 @@ function parseGridLayout(items: PositionedItem[], headers: Array<{ day: number; 
 
     const byDay = new Map<number, PositionedItem[]>();
     for (const item of rowItems) {
-      const day = dayFromX(item.x, headers, imageWidth);
+      const day = dayFromX(item.x, columns);
       if (!byDay.has(day)) byDay.set(day, []);
       byDay.get(day)!.push(item);
     }
@@ -130,14 +192,15 @@ function parseGridLayout(items: PositionedItem[], headers: Array<{ day: number; 
 
 export function parseTimetable(items: OcrItem[], imageWidth: number): OcrLesson[] {
   const usable = normalizeItems(items);
-  const headers = usable.flatMap(i => {
+  const headers: Column[] = usable.flatMap(i => {
     const text = i.text.toLowerCase();
     const day = daysOfWeek.findIndex(d => text.startsWith(d) || text.includes(d));
     return day >= 0 ? [{ day: day + 1, x: i.x }] : [];
   });
+  const columns = detectColumns(usable, headers, Math.max(imageWidth, 1));
 
-  const rangeLessons = parseRangeLayout(usable, headers, imageWidth);
-  const gridLessons = parseGridLayout(usable, headers, imageWidth);
+  const rangeLessons = parseRangeLayout(usable, columns);
+  const gridLessons = parseGridLayout(usable, columns);
   return uniqueLessons([...rangeLessons, ...gridLessons]);
 }
 
