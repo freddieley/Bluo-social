@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   description: 'See who is nearby, find your free friends and stay connected at college.',
   applicationName: 'Bluo',
   manifest: '/manifest.webmanifest',
+  icons: { icon: '/icons/icon.svg', apple: '/icons/icon.svg' },
   alternates: { canonical: 'https://bluo.app' },
 };
 
