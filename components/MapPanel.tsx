@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, MapPin, Minus, Navigation, Plus } from 'lucide-react';
 import type { Person } from '@/lib/types';
 
-// Peter Symonds College (Owens Road) — use the campus itself as the initial map centre.
-// The previous value was ~700m southwest of the college, which made the map look offset.
-const CAMPUS_CENTER: [number, number] = [51.0707, -1.32383];
+// Centre on the middle of the Owens Road campus rather than a single building.
+// PSC spans several OSM features; using the campus centroid keeps the college
+// itself centred in the initial Snapchat-style view.
+const CAMPUS_CENTER: [number, number] = [51.0717, -1.3232];
 const DEFAULT_ZOOM = 16;
 const MIN_ZOOM = 12;
 const MAX_ZOOM = 19;
@@ -47,24 +48,6 @@ function wrapX(x: number, worldTiles: number) {
 
 function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || '?';
-}
-
-function StaticCampusMap({ people }: { people: Person[] }) {
-  const positioned = people.filter(validLocation);
-  return <div className="map-surface map-static" style={{ background: '#dcebd9' }}>
-    <div className="campus">
-      <div className="building" style={{ left: '15%', top: '28%', width: '25%', height: '16%' }} />
-      <div className="building" style={{ left: '49%', top: '12%', width: '29%', height: '23%' }} />
-      <div className="building" style={{ left: '36%', top: '52%', width: '30%', height: '20%' }} />
-      <div className="building" style={{ left: '70%', top: '55%', width: '18%', height: '18%' }} />
-    </div>
-    <span className="map-label" style={{ left: '15%', top: '18%' }}>SCIENCE CENTRE</span>
-    <span className="map-label" style={{ left: '63%', top: '42%' }}>CANTEEN</span>
-    <span className="map-label" style={{ left: '32%', top: '76%' }}>COLLEGE CENTRE</span>
-    <span className="map-label" style={{ right: '11%', bottom: '17%' }}>SPORTS HALL</span>
-    {positioned.map((person) => <div className="marker" key={person.id} style={{ left: '50%', top: '50%' }}><div className="marker-bubble"><MapPin size={22} /></div><div className="marker-name">{person.name}</div></div>)}
-    {!positioned.length && <div className="map-empty"><MapPin size={22} /><b>Location data will appear here</b><span>Allow location sharing to see friends who choose to share theirs.</span></div>}
-  </div>;
 }
 
 export function MapPanel({ people, filter, onFilter }: { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void }) {
