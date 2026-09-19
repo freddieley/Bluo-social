@@ -103,11 +103,11 @@ function TimetableManager({ sb, user, close }: { sb: SupabaseClient; user: User;
 
   const chooseScreenshot = async (file: File | undefined) => {
     if (!file) return;
-    if (file.size > 6 * 1024 * 1024) { setMessage('Please use an image under 6 MB.'); return; }
+    if (file.size > 4 * 1024 * 1024) { setMessage('Please use an image under 4 MB.'); return; }
     if (!file.type.startsWith('image/')) { setMessage('Please upload a timetable image.'); return; }
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     setImageUrl(URL.createObjectURL(file));
-    setScanning(true); setMessage('Reading your timetable on this device…');
+    setScanning(true); setMessage('Uploading timetable securely…');
     try {
       const detected = await scanTimetableImage(file);
       setLessons(prev => {
@@ -139,7 +139,7 @@ function TimetableManager({ sb, user, close }: { sb: SupabaseClient; user: User;
 
   return <div className="quickstart-backdrop" role="dialog" aria-modal="true" aria-label="Timetable"><div className="timetable-modal">
     <div className="sheet-head"><div><div className="eyebrow">Your schedule</div><h2>Timetable</h2><p>Add, change or remove lessons whenever you need.</p></div><button className="icon-btn" onClick={close} aria-label="Close timetable"><X size={18} /></button></div>
-    <div className="timetable-tools"><label className="upload-control">{scanning ? <Loader2 size={16} /> : <Upload size={16} />} {scanning ? 'Scanning…' : 'Upload timetable screenshot'}<input type="file" accept="image/*" disabled={scanning} onChange={e => void chooseScreenshot(e.target.files?.[0])} /></label><span className="person-meta">Lessons are detected automatically — review and edit them before saving.</span></div>
+    <div className="timetable-tools"><label className="upload-control">{scanning ? <Loader2 size={16} /> : <Upload size={16} />} {scanning ? 'Reading…' : 'Upload timetable screenshot'}<input type="file" accept="image/*" disabled={scanning} onChange={e => void chooseScreenshot(e.target.files?.[0])} /></label><span className="person-meta">Your screenshot is read on the server — no OCR processing is done on your phone.</span></div>
     {imageUrl && <div className="timetable-image-wrap"><img src={imageUrl} alt="Uploaded timetable reference" /><button className="secondary" onClick={() => setImageUrl(null)}>Remove screenshot</button></div>}
     <div className="lesson-form"><select className="input" value={day} onChange={e => setDay(Number(e.target.value))}>{days.map((d, i) => <option key={d} value={i + 1}>{d}</option>)}</select><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Subject" maxLength={80} /><input className="input" type="time" value={start} onChange={e => setStart(e.target.value)} /><input className="input" type="time" value={end} onChange={e => setEnd(e.target.value)} /><input className="input" value={room} onChange={e => setRoom(e.target.value)} placeholder="Room (optional)" maxLength={40} /><button className="primary" onClick={add}><Plus size={16} /> Add lesson</button></div>
     <div className="lesson-list">
