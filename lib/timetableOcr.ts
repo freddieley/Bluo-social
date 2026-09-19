@@ -70,30 +70,38 @@ function stripRoom(text: string, room: string | null) {
   return text.replace(new RegExp(`(?:^|\\s)${room}\\s*$`, 'i'), '').trim();
 }
 
-function mergeLessonPair(a: OcrLesson, b: OcrLesson): OcrLesson {
-  const room = a.room || b.room;
+function lessonsRelated(a: OcrLesson, b: OcrLesson) {
   const aName = stripRoom(a.name, a.room);
   const bName = stripRoom(b.name, b.room);
+  const aNormalized = normalizeText(aName);
+  const bNormalized = normalizeText(bName);
   const aTokens = lessonTokens({ ...a, name: aName });
   const bTokens = lessonTokens({ ...b, name: bName });
   const overlap = [...aTokens].filter(token => bTokens.has(token)).length;
   const shorter = Math.min(aTokens.size, bTokens.size);
-  const related = aName.toLowerCase().includes(bName.toLowerCase())
-    || bName.toLowerCase().includes(aName.toLowerCase())
+
+  return aNormalized === bNormalized
+    || aNormalized.includes(bNormalized)
+    || bNormalized.includes(aNormalized)
     || (shorter > 0 && overlap >= Math.min(2, shorter))
-    || (a.room === b.room && room !== null && overlap > 0);
+    || (a.room === b.room && a.room !== null && overlap > 0);
+}
 
-  if (!related) return b;
+function mergeLessonPair(a: OcrLesson, b: OcrLesson): OcrLesson {
+  if (!lessonsRelated(a, b)) return b;
 
+  const room = a.room || b.room;
+  const aName = stripRoom(a.name, a.room);
+  const bName = stripRoom(b.name, b.room);
   const names = [aName, bName]
     .filter(Boolean)
     .sort((x, y) => y.length - x.length);
-  const name = names[0] ?? aName ?? bName;
+
   return {
     day: a.day,
-    start: a.start,
-    end: b.end,
-    name,
+    start: a.start < b.start ? a.start : b.start,
+    end: a.end > b.end ? a.end : b.end,
+    name: names[0] ?? aName ?? bName,
     room,
   };
 }
@@ -105,6 +113,24 @@ function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
 
   const result: OcrLesson[] = [];
   for (const lesson of sorted) {
+    // OCR can recognise the same real lesson twice with different end times.
+    // This happens with double lessons when one OCR path sees the first period
+    // boundary (e.g. 11:10–12:05) and another sees the full block (11:10–13:00).
+    // If the day/start match and the lesson identity matches, keep one lesson
+    // and use the furthest end time.
+    const sameStartIndex = result.findIndex(existing =>
+      existing.day === lesson.day &&
+      existing.start === lesson.start &&
+      lessonsRelated(existing, lesson),
+    );
+
+    if (sameStartIndex >= 0) {
+      result[sameStartIndex] = mergeLessonPair(result[sameStartIndex], lesson);
+      continue;
+    }
+
+    // Exact duplicate with the same slot is covered even when OCR produced a
+    // slightly different subject string that still maps to the same room.
     const sameSlotIndex = result.findIndex(existing =>
       existing.day === lesson.day &&
       existing.start === lesson.start &&
@@ -113,24 +139,25 @@ function collapseDuplicateAndDoubleLessons(lessons: OcrLesson[]) {
 
     if (sameSlotIndex >= 0) {
       const existing = result[sameSlotIndex];
-      const merged = mergeLessonPair(existing, lesson);
-      result[sameSlotIndex] = merged === lesson ? existing : merged;
-      continue;
+      if (lessonsRelated(existing, lesson)) {
+        result[sameSlotIndex] = mergeLessonPair(existing, lesson);
+        continue;
+      }
     }
 
+    // Merge genuine adjacent periods when the OCR has split a double lesson
+    // into two consecutive blocks and both blocks describe the same lesson.
     const previous = result[result.length - 1];
     if (
       previous &&
       previous.day === lesson.day &&
       previous.end === lesson.start &&
       lessonMinutes(previous.start, previous.end) <= 60 &&
-      lessonMinutes(lesson.start, lesson.end) <= 60
+      lessonMinutes(lesson.start, lesson.end) <= 60 &&
+      lessonsRelated(previous, lesson)
     ) {
-      const merged = mergeLessonPair(previous, lesson);
-      if (merged !== lesson) {
-        result[result.length - 1] = merged;
-        continue;
-      }
+      result[result.length - 1] = mergeLessonPair(previous, lesson);
+      continue;
     }
 
     result.push(lesson);
@@ -156,9 +183,6 @@ function detectColumns(items: PositionedItem[], headers: Column[], imageWidth: n
     .map(item => item.x)
     .sort((a, b) => a - b);
 
-  // Timetables normally have one or more range anchors per day. Cluster those
-  // anchors by the largest horizontal gaps so OCR does not need to preserve the
-  // exact day-header text to recover the five columns.
   const uniqueXs = rangeXs.filter((x, index, all) => index === 0 || Math.abs(x - all[index - 1]) > imageWidth * 0.025);
   if (uniqueXs.length >= 3) {
     const gaps = uniqueXs.slice(1).map((x, index) => ({ gap: x - uniqueXs[index], index }));
@@ -203,9 +227,6 @@ function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
     const currentBottom = current.item.y + current.item.height / 2;
     const nextTop = nextSameDay ? nextSameDay.item.y - nextSameDay.item.height / 2 : Number.POSITIVE_INFINITY;
 
-    // Assign by column rather than a fixed percentage around the time label.
-    // Subject/room text can be substantially indented or aligned differently
-    // between timetable providers.
     const candidates = items
       .filter(i => i !== current.item)
       .filter(i => dayFromX(i.x, columns) === day)
@@ -223,13 +244,7 @@ function parseRangeLayout(items: PositionedItem[], columns: Column[]) {
     const name = nameCandidates.map(i => stripRoom(i.text, extractRoom(i.text))).join(' ').replace(/\s+/g, ' ').trim();
     if (!name) continue;
 
-    result.push({
-      day,
-      start: current.time.start,
-      end: current.time.end,
-      name,
-      room: roomItem ? extractRoom(roomItem.text) : null,
-    });
+    result.push({ day, start: current.time.start, end: current.time.end, name, room: roomItem ? extractRoom(roomItem.text) : null });
   }
 
   return uniqueLessons(result);
@@ -308,11 +323,7 @@ export async function scanTimetableImage(file: Blob): Promise<OcrLesson[]> {
 
   let response: Response;
   try {
-    response = await fetch('/api/timetable/ocr', {
-      method: 'POST',
-      body: form,
-      cache: 'no-store',
-    });
+    response = await fetch('/api/timetable/ocr', { method: 'POST', body: form, cache: 'no-store' });
   } catch {
     throw new Error('Could not reach the timetable OCR service. Please check your connection and try again.');
   }
@@ -331,8 +342,6 @@ export async function scanTimetableImage(file: Blob): Promise<OcrLesson[]> {
   if (!items.length || !imageWidth) throw new Error('OCR returned no usable timetable text. Please try the screenshot again.');
 
   const lessons = parseTimetable(items, imageWidth);
-  if (!lessons.length) {
-    throw new Error(`OCR detected ${items.length} text regions, but could not map them to timetable lessons. Please try a clearer screenshot or add lessons manually.`);
-  }
+  if (!lessons.length) throw new Error(`OCR detected ${items.length} text regions, but could not map them to timetable lessons. Please try a clearer screenshot or add lessons manually.`);
   return lessons;
 }
