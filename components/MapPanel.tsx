@@ -5,7 +5,6 @@ import { LocateFixed, MapPin, Navigation } from 'lucide-react';
 import type { Person } from '@/lib/types';
 import { Avatar } from './Avatar';
 
-const CAMPUS_CENTER: [number, number] = [-1.3284, 51.0665];
 const MAP_BBOX = { minLat: 51.0635, maxLat: 51.0695, minLng: -1.3335, maxLng: -1.3230 };
 const OSM_EMBED_URL = `https://www.openstreetmap.org/export/embed.html?bbox=${MAP_BBOX.minLng},${MAP_BBOX.minLat},${MAP_BBOX.maxLng},${MAP_BBOX.maxLat}&layer=mapnik`;
 
@@ -45,30 +44,25 @@ function StaticCampusMap({ people }: { people: Person[] }) {
 export function MapPanel({ people, filter, onFilter }: { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void }) {
   const [lowData] = useState(connectionIsLow);
   const [mapFailed, setMapFailed] = useState(false);
+  const [mapKey, setMapKey] = useState(0);
   const positioned = people.map((p) => ({ person: p, position: markerPosition(p.location) })).filter((x): x is { person: Person; position: [number, number] } => Boolean(x.position));
   const freeCount = people.filter((p) => p.free).length;
-
-  const centre = () => {
-    // Reloading the OSM embed resets it to the saved Peter Symonds College view.
-    window.dispatchEvent(new Event('bluo-map-reset'));
-  };
-
   const showStatic = lowData || mapFailed;
 
   return <section className="card map-card">
     {showStatic ? <StaticCampusMap people={people} /> : <div className="map-surface map-live" aria-label="Peter Symonds College street map" style={{ zIndex: 1, background: '#e9eef3' }}>
       <iframe
-        key={mapFailed ? 'failed' : 'live'}
+        key={mapKey}
         title="Peter Symonds College street map"
         src={OSM_EMBED_URL}
-        className="bluo-map-iframe"
         loading="eager"
         referrerPolicy="strict-origin-when-cross-origin"
         onError={() => setMapFailed(true)}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, display: 'block', zIndex: 1 }}
       />
-      <div className="bluo-map-attribution">© OpenStreetMap contributors</div>
-      {positioned.map(({ person, position }) => <div className="marker map-iframe-marker" key={person.id} style={{ left: `${position[0]}%`, top: `${position[1]}%` }}><div className="marker-bubble"><Avatar config={person.avatar} size={35} /></div><div className="marker-name">{person.name}</div></div>)}
-      {!positioned.length && <div className="map-iframe-empty"><Navigation size={18} /><span>Friends who share their location will appear here.</span></div>}
+      <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 3, background: 'rgba(255,255,255,.9)', borderRadius: 5, padding: '3px 6px', fontSize: 10, color: '#3f4d5e' }}>© OpenStreetMap contributors</div>
+      {positioned.map(({ person, position }) => <div className="marker" key={person.id} style={{ left: `${position[0]}%`, top: `${position[1]}%`, zIndex: 5 }}><div className="marker-bubble"><Avatar config={person.avatar} size={35} /></div><div className="marker-name">{person.name}</div></div>)}
+      {!positioned.length && <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 4, background: 'rgba(255,255,255,.94)', borderRadius: 12, padding: '10px 13px', boxShadow: '0 6px 18px rgba(20,50,90,.12)', fontSize: 11, color: '#7183a3', display: 'flex', alignItems: 'center', gap: 7, pointerEvents: 'none' }}><Navigation size={16} />Friends who share their location will appear here.</div>}
     </div>}
     <div className="map-overlay">
       <div className="map-filter">{(['friends', 'nearby', 'everyone'] as const).map((f) => <button key={f} className={`filter-btn ${filter === f ? 'active' : ''}`} onClick={() => onFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>)}</div>
@@ -76,7 +70,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     </div>
     <div className="map-bottom">
       <div className="availability"><strong>{freeCount ? `${freeCount} ${freeCount === 1 ? 'person is' : 'people are'} free now` : 'No friends marked free yet'}</strong><span>{positioned.length ? `${positioned.length} visible on the map` : 'Share your location when you are ready'}</span></div>
-      <button className="icon-btn" aria-label="Centre map" onClick={centre}><LocateFixed size={18} /></button>
+      <button className="icon-btn" aria-label="Centre map" onClick={() => setMapKey((value) => value + 1)}><LocateFixed size={18} /></button>
     </div>
   </section>;
 }
