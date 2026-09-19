@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, MapPin, Navigation } from 'lucide-react';
 import type { Person } from '@/lib/types';
-import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const CAMPUS_CENTER: [number, number] = [51.0665, -1.3284];
@@ -43,8 +42,8 @@ function StaticCampusMap({ people }: { people: Person[] }) {
 
 export function MapPanel({ people, filter, onFilter }: { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void }) {
   const mapHost = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
-  const markersRef = useRef<LeafletMarker[]>([]);
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const positioned = people.filter(validLocation);
@@ -53,6 +52,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
   useEffect(() => {
     if (!mapHost.current) return;
     let disposed = false;
+    let firstTileLoaded = false;
     let fallbackTimer: number | undefined;
 
     setMapFailed(false);
@@ -75,10 +75,13 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
         boxZoom: true,
         keyboard: true,
         tap: true,
+        zoomSnap: 0.25,
+        zoomDelta: 0.5,
+        inertia: true,
       });
 
       map.attributionControl.setPrefix('');
-      L.tileLayer(TILE_URL, {
+      const tiles = L.tileLayer(TILE_URL, {
         maxZoom: 19,
         minZoom: 12,
         tileSize: 256,
@@ -89,20 +92,16 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
       }).addTo(map);
 
       mapRef.current = map;
+      tiles.once('load', () => { firstTileLoaded = true; });
       map.whenReady(() => {
         if (disposed) return;
         map.invalidateSize(false);
         setMapReady(true);
       });
 
-      const tileError = () => {
-        if (!disposed) setMapFailed(true);
-      };
-      map.on('tileerror', tileError);
-
       fallbackTimer = window.setTimeout(() => {
-        if (!disposed && !mapReady) setMapFailed(true);
-      }, 9000);
+        if (!disposed && !firstTileLoaded) setMapFailed(true);
+      }, 10000);
     }).catch(() => setMapFailed(true));
 
     return () => {
@@ -136,6 +135,21 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
   const centre = () => mapRef.current?.flyTo(CAMPUS_CENTER, DEFAULT_ZOOM, { duration: 0.55 });
 
   return <section className="card map-card">
+    <style jsx global>{`
+      .map-live { background: #dcebd9 !important; }
+      .map-live::before { display: none !important; }
+      .map-live .leaflet-container { width: 100%; height: 100%; font-family: 'DM Sans', system-ui, sans-serif; background: #dcebd9; }
+      .map-live .leaflet-control-attribution { margin: 0 8px 8px 0; border-radius: 8px; padding: 3px 6px; background: rgba(255,255,255,.88); box-shadow: 0 4px 12px rgba(20,50,90,.08); }
+      .map-live .leaflet-control-attribution a { color: #0d2d63; }
+      .bluo-leaflet-icon { background: transparent !important; border: 0 !important; }
+      .bluo-map-marker { width: 70px; height: 76px; display: flex; flex-direction: column; align-items: center; pointer-events: auto; cursor: pointer; }
+      .bluo-map-avatar { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: #1479ff; color: #fff; border: 3px solid #fff; box-shadow: 0 7px 20px rgba(19,91,188,.30); font: 800 13px 'Plus Jakarta Sans', sans-serif; }
+      .bluo-map-name { margin-top: 4px; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(255,255,255,.96); color: #0d2d63; padding: 4px 7px; border-radius: 8px; box-shadow: 0 5px 15px rgba(30,60,90,.14); font: 800 10px system-ui, sans-serif; }
+      .map-live .leaflet-marker-icon { filter: none; }
+      .map-live .leaflet-control-zoom { display: none; }
+      .map-live .leaflet-control-attribution { z-index: 20; }
+    `}</style>
+
     {mapFailed ? <StaticCampusMap people={people} /> : <div ref={mapHost} className="map-surface map-live" aria-label="Peter Symonds College interactive street map" />}
 
     {!mapFailed && !mapReady && <div style={{ position: 'absolute', inset: 0, zIndex: 8, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
