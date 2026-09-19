@@ -7,4 +7,8 @@ export const avatarDefaults: AvatarConfig = {
   bg: '#E8F4FF',
   eyes: '#26344A',
   mouth: '#A95B55',
+  hairStyle: 'sidePart',
+  faceShape: 'oval',
+  pose: 'front',
+  accessory: 'none',
 };
