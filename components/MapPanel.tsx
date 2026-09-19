@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { LocateFixed, MapPin, Minus, Navigation, Plus } from 'lucide-react';
+import { LocateFixed, Minus, Navigation, Plus } from 'lucide-react';
 import type { Person } from '@/lib/types';
 
 // Centre on the middle of the Owens Road campus rather than a single building.
@@ -16,6 +16,7 @@ const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 type Point = { x: number; y: number };
 type View = { center: [number, number]; zoom: number };
+type Props = { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void };
 
 function validLocation(person: Person): boolean {
   return Number.isFinite(person.location?.[0]) && Number.isFinite(person.location?.[1]) && person.location[0] !== 0 && person.location[1] !== 0;
@@ -28,10 +29,7 @@ function clamp(value: number, min: number, max: number) {
 function project([lat, lon]: [number, number], zoom: number): Point {
   const scale = TILE_SIZE * 2 ** zoom;
   const sin = clamp(Math.sin((lat * Math.PI) / 180), -0.9999, 0.9999);
-  return {
-    x: ((lon + 180) / 360) * scale,
-    y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale,
-  };
+  return { x: ((lon + 180) / 360) * scale, y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale };
 }
 
 function unproject({ x, y }: Point, zoom: number): [number, number] {
@@ -50,7 +48,7 @@ function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
-export function MapPanel({ people, filter, onFilter }: { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void }) {
+export function MapPanel({ people, filter, onFilter }: Props) {
   const mapHost = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<View>({ center: CAMPUS_CENTER, zoom: DEFAULT_ZOOM });
   const dragRef = useRef<{ pointerId: number; start: Point; center: Point } | null>(null);
@@ -58,8 +56,25 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
   const [view, setView] = useState<View>(viewRef.current);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [tileLoaded, setTileLoaded] = useState(false);
+  const [myLocation, setMyLocation] = useState<[number, number] | undefined>();
   const positioned = people.filter(validLocation);
   const freeCount = people.filter((p) => p.free).length;
+
+  // loadPeople intentionally excludes the signed-in user because it feeds the
+  // social/friends UI. Read the browser location locally so solo testers still
+  // see themselves on the map immediately after granting location permission.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    let active = true;
+    const locate = () => navigator.geolocation.getCurrentPosition(
+      (position) => { if (active) setMyLocation([position.coords.latitude, position.coords.longitude]); },
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 180000, timeout: 10000 },
+    );
+    locate();
+    const id = window.setInterval(locate, 300000);
+    return () => { active = false; window.clearInterval(id); };
+  }, []);
 
   useEffect(() => {
     const host = mapHost.current;
@@ -71,10 +86,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     return () => observer.disconnect();
   }, []);
 
-  const commitView = (next: View) => {
-    viewRef.current = next;
-    setView(next);
-  };
+  const commitView = (next: View) => { viewRef.current = next; setView(next); };
 
   const zoomAt = (nextZoom: number, point?: Point) => {
     const current = viewRef.current;
@@ -96,9 +108,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     event.currentTarget.setPointerCapture(event.pointerId);
     pointersRef.current.set(event.pointerId, point);
-    if (pointersRef.current.size === 1) {
-      dragRef.current = { pointerId: event.pointerId, start: point, center: project(viewRef.current.center, viewRef.current.zoom) };
-    }
+    if (pointersRef.current.size === 1) dragRef.current = { pointerId: event.pointerId, start: point, center: project(viewRef.current.center, viewRef.current.zoom) };
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -111,10 +121,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     commitView({ ...viewRef.current, center: unproject(nextWorld, viewRef.current.zoom) });
   };
 
-  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    pointersRef.current.delete(event.pointerId);
-    dragRef.current = null;
-  };
+  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => { pointersRef.current.delete(event.pointerId); dragRef.current = null; };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -142,6 +149,14 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     }
   }
 
+  const markerPosition = (location: [number, number]) => {
+    const point = project(location, view.zoom);
+    return { x: point.x - left, y: point.y - top };
+  };
+  const mePoint = myLocation ? markerPosition(myLocation) : null;
+  const meVisible = Boolean(mePoint && mePoint.x >= -100 && mePoint.y >= -100 && mePoint.x <= size.width + 100 && mePoint.y <= size.height + 100);
+  const visibleCount = positioned.length + (myLocation ? 1 : 0);
+
   return <section className="card map-card">
     <style jsx global>{`
       .map-live { background:#dcebd9 !important; overflow:hidden; cursor:grab; touch-action:none; user-select:none; }
@@ -149,7 +164,9 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
       .bluo-tile { position:absolute; width:256px; height:256px; max-width:none; pointer-events:none; user-select:none; }
       .bluo-map-marker-live { position:absolute; width:90px; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; z-index:4; pointer-events:none; }
       .bluo-map-avatar-live { width:46px; height:46px; border-radius:50%; display:grid; place-items:center; background:#1479ff; color:#fff; border:3px solid #fff; box-shadow:0 7px 20px rgba(19,91,188,.30); font:800 13px 'Plus Jakarta Sans',sans-serif; }
+      .bluo-map-avatar-me { background:#0d2d63; box-shadow:0 0 0 4px rgba(20,121,255,.18), 0 7px 20px rgba(19,91,188,.30); }
       .bluo-map-name-live { margin-top:4px; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:rgba(255,255,255,.96); color:#0d2d63; padding:4px 7px; border-radius:8px; box-shadow:0 5px 15px rgba(30,60,90,.14); font:800 10px system-ui,sans-serif; }
+      .bluo-map-name-me { background:#0d2d63; color:#fff; }
       .map-zoom-controls { position:absolute; right:18px; top:84px; z-index:15; display:grid; gap:6px; }
       .map-zoom-controls button { width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,.94); color:#0d2d63; display:grid; place-items:center; box-shadow:0 8px 22px rgba(20,50,90,.14); }
       .map-attribution { position:absolute; right:10px; bottom:10px; z-index:6; background:rgba(255,255,255,.88); padding:3px 6px; border-radius:7px; font-size:9px; color:#52647f; }
@@ -159,12 +176,11 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     <div ref={mapHost} className="map-surface map-live" aria-label="Peter Symonds College interactive street map" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd} onWheel={handleWheel}>
       {tiles.map((tile) => <img key={tile.key} className="bluo-tile" src={tile.url} alt="" draggable={false} onLoad={() => setTileLoaded(true)} style={{ left: tile.x, top: tile.y }} />)}
       {positioned.map((person) => {
-        const point = project(person.location, view.zoom);
-        const x = point.x - left;
-        const y = point.y - top;
+        const { x, y } = markerPosition(person.location);
         if (x < -100 || y < -100 || x > size.width + 100 || y > size.height + 100) return null;
         return <div key={person.id} className="bluo-map-marker-live" style={{ left: x, top: y }}><div className="bluo-map-avatar-live">{initials(person.name)}</div><div className="bluo-map-name-live">{person.name}</div></div>;
       })}
+      {meVisible && mePoint && <div className="bluo-map-marker-live" style={{ left: mePoint.x, top: mePoint.y }}><div className="bluo-map-avatar-live bluo-map-avatar-me">You</div><div className="bluo-map-name-live bluo-map-name-me">You</div></div>}
       <div className="map-attribution">&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors</div>
     </div>
 
@@ -172,7 +188,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
 
     <div className="map-overlay">
       <div className="map-filter">{(['friends', 'nearby', 'everyone'] as const).map((f) => <button key={f} className={`filter-btn ${filter === f ? 'active' : ''}`} onClick={() => onFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>)}</div>
-      <div className="map-info"><span className="mode-dot" style={{ display:'inline-block' }} /> Live street map · {positioned.length} visible</div>
+      <div className="map-info"><span className="mode-dot" style={{ display:'inline-block' }} /> Live street map · {visibleCount} visible</div>
     </div>
 
     <div className="map-zoom-controls">
@@ -181,7 +197,7 @@ export function MapPanel({ people, filter, onFilter }: { people: Person[]; filte
     </div>
 
     <div className="map-bottom">
-      <div className="availability"><strong>{freeCount ? `${freeCount} ${freeCount === 1 ? 'person is' : 'people are'} free now` : 'No friends marked free yet'}</strong><span>{positioned.length ? `${positioned.length} visible on the map` : 'Share your location when you are ready'}</span></div>
+      <div className="availability"><strong>{freeCount ? `${freeCount} ${freeCount === 1 ? 'person is' : 'people are'} free now` : 'No friends marked free yet'}</strong><span>{visibleCount ? `${visibleCount} visible on the map` : 'Share your location when you are ready'}</span></div>
       <button className="icon-btn" aria-label="Centre map" title="Centre map on Peter Symonds College" onClick={centre}><LocateFixed size={18}/></button>
     </div>
   </section>;
