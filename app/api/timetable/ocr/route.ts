@@ -73,7 +73,9 @@ export async function POST(request: Request) {
   upstream.append('isOverlayRequired', 'true');
   upstream.append('detectOrientation', 'true');
   upstream.append('scale', 'true');
-  upstream.append('isTable', 'true');
+  // Do not enable OCR.space's table mode here. Bluo needs the original spatial
+  // relationships between each timetable column, not a table-normalized text stream.
+  upstream.append('isTable', 'false');
   upstream.append('OCREngine', '2');
 
   let response: Response;
@@ -102,8 +104,8 @@ export async function POST(request: Request) {
     return jsonError(detail ? `OCR failed: ${detail}` : 'The OCR service could not read this timetable.', 422);
   }
 
-  // OCR.space exposes word-level coordinates inside visual lines. Convert each
-  // line into the same line-level regions consumed by our timetable parser.
+  // Keep OCR.space's visual line boxes. Unlike table-mode output, these retain
+  // the spatial grouping needed to distinguish the five timetable columns.
   const items = payload.ParsedResults.flatMap(result =>
     (result.TextOverlay?.Lines ?? [])
       .map(lineToItem)
@@ -112,8 +114,11 @@ export async function POST(request: Request) {
 
   if (!items.length) return jsonError('OCR completed but returned no positioned text. Please try the screenshot again.', 422);
 
-  const imageWidth = Math.max(...items.flatMap(item => item.poly.map(point => point[0])));
-  const imageHeight = Math.max(...items.flatMap(item => item.poly.map(point => point[1])));
+  // OCR.space does not return the source image dimensions. The parser only needs
+  // a horizontal extent for its fallback column calculation, so derive a safe
+  // extent from the rightmost OCR box and include a small margin.
+  const imageWidth = Math.max(...items.flatMap(item => item.poly.map(point => point[0]))) * 1.01;
+  const imageHeight = Math.max(...items.flatMap(item => item.poly.map(point => point[1]))) * 1.01;
 
   return NextResponse.json({
     items,
