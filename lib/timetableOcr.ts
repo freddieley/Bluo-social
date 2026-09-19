@@ -147,12 +147,16 @@ let enginePromise: Promise<OcrEngine> | null = null;
 export function loadOcrEngine(): Promise<OcrEngine> {
   if (!enginePromise) {
     enginePromise = (async () => {
-      const paddleOcrUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle&target=es2022&conditions=browser';
+      // Use jsDelivr's browser ESM build. The previous esm.sh bundle pulled a
+      // Node/unenv process shim into Safari/Next, causing process.binding() to
+      // throw before OCR could run. jsDelivr's +esm entry is browser-oriented
+      // and keeps the official PaddleOCR.js package intact.
+      const paddleOcrUrl = 'https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm';
       const { PaddleOCR } = await import(/* webpackIgnore: true */ paddleOcrUrl);
       return PaddleOCR.create({
         lang: 'en',
         ocrVersion: 'PP-OCRv5',
-        worker: true,
+        worker: false,
         ortOptions: {
           backend: 'wasm',
           wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
