@@ -14,18 +14,14 @@ type OcrSpaceWord = {
   Height?: number;
 };
 
+type OcrSpaceLine = { Words?: OcrSpaceWord[] };
+
 type OcrSpaceResponse = {
   ParsedResults?: Array<{
-    FileParseExitCode?: number | string;
-    ParsedText?: string;
-    TextOverlay?: {
-      HasOverlay?: boolean;
-      Lines?: Array<{ Words?: OcrSpaceWord[] }>;
-    } | null;
+    TextOverlay?: { Lines?: OcrSpaceLine[] } | null;
     ErrorMessage?: string | null;
     ErrorDetails?: string | null;
   }>;
-  OCRExitCode?: number | string;
   IsErroredOnProcessing?: boolean;
   ErrorMessage?: string | null;
   ErrorDetails?: string | null;
@@ -33,6 +29,24 @@ type OcrSpaceResponse = {
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function lineToItem(line: OcrSpaceLine) {
+  const words = (line.Words ?? []).filter(word => word.WordText?.trim());
+  if (!words.length) return null;
+
+  const left = Math.min(...words.map(word => Number(word.Left ?? 0)));
+  const top = Math.min(...words.map(word => Number(word.Top ?? 0)));
+  const right = Math.max(...words.map(word => Number(word.Left ?? 0) + Number(word.Width ?? 0)));
+  const bottom = Math.max(...words.map(word => Number(word.Top ?? 0) + Number(word.Height ?? 0)));
+  const text = words.map(word => word.WordText!.replace(/\s+/g, ' ').trim()).join(' ').trim();
+
+  if (!text || right <= left || bottom <= top) return null;
+  return {
+    text,
+    score: 1,
+    poly: [[left, top], [right, top], [right, bottom], [left, bottom]],
+  };
 }
 
 export async function POST(request: Request) {
@@ -74,9 +88,7 @@ export async function POST(request: Request) {
     return jsonError('The OCR service could not be reached. Please try again.', 502);
   }
 
-  if (!response.ok) {
-    return jsonError('The OCR service returned an error. Please try again.', 502);
-  }
+  if (!response.ok) return jsonError('The OCR service returned an error. Please try again.', 502);
 
   let payload: OcrSpaceResponse;
   try {
@@ -90,33 +102,21 @@ export async function POST(request: Request) {
     return jsonError(detail ? `OCR failed: ${detail}` : 'The OCR service could not read this timetable.', 422);
   }
 
+  // OCR.space exposes word-level coordinates inside visual lines. Convert each
+  // line into the same line-level regions consumed by our timetable parser.
   const items = payload.ParsedResults.flatMap(result =>
-    result.TextOverlay?.Lines?.flatMap(line =>
-      (line.Words ?? []).map(word => {
-        const text = word.WordText?.replace(/\s+/g, ' ').trim() ?? '';
-        const left = Number(word.Left ?? 0);
-        const top = Number(word.Top ?? 0);
-        const width = Number(word.Width ?? 0);
-        const height = Number(word.Height ?? 0);
-        return {
-          text,
-          score: 1,
-          poly: [
-            [left, top],
-            [left + width, top],
-            [left + width, top + height],
-            [left, top + height],
-          ],
-        };
-      }),
-    ) ?? [],
-  ).filter(item => item.text && item.poly[1][0] > item.poly[0][0] && item.poly[2][1] > item.poly[0][1]);
+    (result.TextOverlay?.Lines ?? [])
+      .map(lineToItem)
+      .filter((item): item is NonNullable<ReturnType<typeof lineToItem>> => Boolean(item)),
+  );
 
   if (!items.length) return jsonError('OCR completed but returned no positioned text. Please try the screenshot again.', 422);
 
+  const imageWidth = Math.max(...items.flatMap(item => item.poly.map(point => point[0])));
+  const imageHeight = Math.max(...items.flatMap(item => item.poly.map(point => point[1])));
+
   return NextResponse.json({
     items,
-    // OCR.space overlay coordinates are in the original uploaded image space.
-    image: { width: image.width || 0, height: image.height || 0 },
+    image: { width: imageWidth, height: imageHeight },
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
