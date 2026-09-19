@@ -1,70 +1,168 @@
 'use client';
 
-import { useMemo } from 'react';
-import { LocateFixed, MapPin } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { LocateFixed, MapPin, Minus, Navigation, Plus } from 'lucide-react';
 import type { Person } from '@/lib/types';
 import { Avatar } from './Avatar';
+import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 
-const MAP_CENTER: [number, number] = [-1.3284, 51.0665];
-const MAP_ZOOM = 16;
-const TILE_SIZE = 256;
+const CAMPUS_CENTER: [number, number] = [-1.3284, 51.0665];
 const STREET_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const MAP_BBOX = { minLat: 51.0635, maxLat: 51.0695, minLng: -1.3335, maxLng: -1.3230 };
+const DEFAULT_ZOOM = 16.2;
 
-function markerPosition(location?: [number, number]): [number, number] | null {
-  if (!location || location[0] === 0 || location[1] === 0) return null;
-  const x = ((location[1] - MAP_BBOX.minLng) / (MAP_BBOX.maxLng - MAP_BBOX.minLng)) * 100;
-  const y = (1 - (location[0] - MAP_BBOX.minLat) / (MAP_BBOX.maxLat - MAP_BBOX.minLat)) * 100;
-  if (x < 2 || x > 98 || y < 2 || y > 98) return null;
-  return [x, y];
+function validLocation(person: Person): boolean {
+  return Number.isFinite(person.location?.[0]) && Number.isFinite(person.location?.[1]) && person.location[0] !== 0 && person.location[1] !== 0;
 }
 
-function worldPixel(lng: number, lat: number, zoom: number): [number, number] {
-  const scale = TILE_SIZE * 2 ** zoom;
-  const x = ((lng + 180) / 360) * scale;
-  const sinLat = Math.sin((lat * Math.PI) / 180);
-  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
-  return [x, y];
+function markerElement(person: Person): HTMLDivElement {
+  const root = document.createElement('div');
+  root.style.cssText = 'display:flex;flex-direction:column;align-items:center;transform:translateY(-100%);pointer-events:auto;cursor:pointer';
+  root.title = person.name;
+
+  const bubble = document.createElement('div');
+  bubble.style.cssText = 'width:48px;height:48px;border-radius:50%;background:#fff;border:3px solid #1479ff;box-shadow:0 8px 22px rgba(19,91,188,.28);display:grid;place-items:center;overflow:hidden';
+  const avatarHost = document.createElement('div');
+  avatarHost.style.cssText = 'width:100%;height:100%;display:grid;place-items:center';
+  bubble.appendChild(avatarHost);
+  root.appendChild(bubble);
+
+  const label = document.createElement('div');
+  label.style.cssText = 'margin-top:5px;background:rgba(255,255,255,.96);padding:4px 8px;border-radius:8px;box-shadow:0 5px 15px rgba(30,60,90,.14);font:800 10px system-ui;white-space:nowrap;color:#0d2d63';
+  label.textContent = person.name;
+  root.appendChild(label);
+
+  void import('react-dom/client').then(({ createRoot }) => {
+    if (!avatarHost.isConnected) return;
+    createRoot(avatarHost).render(<Avatar config={person.avatar} size={40} />);
+  });
+
+  return root;
 }
 
-function TileMap({ people }: { people: Person[] }) {
-  const [centerX, centerY] = worldPixel(MAP_CENTER[0], MAP_CENTER[1], MAP_ZOOM);
-  const centerTileX = Math.floor(centerX / TILE_SIZE);
-  const centerTileY = Math.floor(centerY / TILE_SIZE);
-  const offsetX = centerX - centerTileX * TILE_SIZE;
-  const offsetY = centerY - centerTileY * TILE_SIZE;
-  const positioned = people.map((p) => ({ person: p, position: markerPosition(p.location) })).filter((x): x is { person: Person; position: [number, number] } => Boolean(x.position));
-
-  const tiles = useMemo(() => [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => {
-    const x = centerTileX + dx;
-    const y = centerTileY + dy;
-    const src = STREET_TILES.replace('{z}', String(MAP_ZOOM)).replace('{x}', String(x)).replace('{y}', String(y));
-    return { x, y, dx, dy, src };
-  })), [centerTileX, centerTileY]);
-
-  return <div className="map-surface map-live" aria-label="Peter Symonds College street map" style={{ background: '#e8edf1' }}>
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      {tiles.map((tile) => <img key={`${tile.x}-${tile.y}`} src={tile.src} alt="" draggable={false} style={{ position: 'absolute', width: TILE_SIZE, height: TILE_SIZE, maxWidth: 'none', left: `calc(50% + ${tile.dx * TILE_SIZE - offsetX}px)`, top: `calc(50% + ${tile.dy * TILE_SIZE - offsetY}px)`, userSelect: 'none' }} />)}
-      {positioned.map(({ person, position }) => <div className="marker" key={person.id} style={{ left: `${position[0]}%`, top: `${position[1]}%`, zIndex: 5 }}><div className="marker-bubble"><Avatar config={person.avatar} size={35} /></div><div className="marker-name">{person.name}</div></div>)}
-      {!positioned.length && <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 4, background: 'rgba(255,255,255,.94)', borderRadius: 12, padding: '10px 13px', boxShadow: '0 6px 18px rgba(20,50,90,.12)', fontSize: 11, color: '#7183a3', display: 'flex', alignItems: 'center', gap: 7, pointerEvents: 'none' }}><MapPin size={16} />Friends who share their location will appear here.</div>}
+function StaticCampusMap({ people }: { people: Person[] }) {
+  const positioned = people.filter(validLocation);
+  return <div className="map-surface map-static" style={{ background: '#dcebd9' }}>
+    <div className="campus">
+      <div className="building" style={{ left: '15%', top: '28%', width: '25%', height: '16%' }} />
+      <div className="building" style={{ left: '49%', top: '12%', width: '29%', height: '23%' }} />
+      <div className="building" style={{ left: '36%', top: '52%', width: '30%', height: '20%' }} />
+      <div className="building" style={{ left: '70%', top: '55%', width: '18%', height: '18%' }} />
     </div>
-    <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 8, background: 'rgba(255,255,255,.9)', borderRadius: 5, padding: '3px 6px', fontSize: 10, color: '#3f4d5e' }}>© OpenStreetMap contributors</div>
+    <span className="map-label" style={{ left: '15%', top: '18%' }}>SCIENCE CENTRE</span>
+    <span className="map-label" style={{ left: '63%', top: '42%' }}>CANTEEN</span>
+    <span className="map-label" style={{ left: '32%', top: '76%' }}>COLLEGE CENTRE</span>
+    <span className="map-label" style={{ right: '11%', bottom: '17%' }}>SPORTS HALL</span>
+    {positioned.map((person) => <div className="marker" key={person.id} style={{ left: '50%', top: '50%' }}><div className="marker-bubble"><Avatar config={person.avatar} size={35} /></div><div className="marker-name">{person.name}</div></div>)}
+    {!positioned.length && <div className="map-empty"><MapPin size={22} /><b>Location data will appear here</b><span>Allow location sharing to see friends who choose to share theirs.</span></div>}
   </div>;
 }
 
 export function MapPanel({ people, filter, onFilter }: { people: Person[]; filter: 'friends' | 'nearby' | 'everyone'; onFilter: (f: 'friends' | 'nearby' | 'everyone') => void }) {
-  const positioned = people.map((p) => ({ person: p, position: markerPosition(p.location) })).filter((x): x is { person: Person; position: [number, number] } => Boolean(x.position));
+  const mapHost = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const markersRef = useRef<MapLibreMarker[]>([]);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
+  const positioned = people.filter(validLocation);
   const freeCount = people.filter((p) => p.free).length;
 
+  useEffect(() => {
+    if (!mapHost.current) return;
+    let disposed = false;
+    let loaded = false;
+    let fallbackTimer: number | undefined;
+    setMapFailed(false);
+
+    void import('maplibre-gl').then(({ Map }) => {
+      if (disposed || !mapHost.current) return;
+      const map = new Map({
+        container: mapHost.current,
+        style: {
+          version: 8,
+          sources: {
+            street: {
+              type: 'raster',
+              tiles: [STREET_TILES],
+              tileSize: 256,
+              attribution: '© OpenStreetMap contributors',
+            },
+          },
+          layers: [{ id: 'street', type: 'raster', source: 'street' }],
+        },
+        center: CAMPUS_CENTER,
+        zoom: DEFAULT_ZOOM,
+        minZoom: 13,
+        maxZoom: 19,
+        attributionControl: { compact: true },
+        dragRotate: false,
+        touchPitch: false,
+      });
+      mapRef.current = map;
+      map.on('load', () => {
+        if (disposed) return;
+        loaded = true;
+        map.resize();
+        setMapReady(true);
+      });
+      map.on('error', (event) => {
+        if (!disposed && event.error) setMapFailed(true);
+      });
+      fallbackTimer = window.setTimeout(() => {
+        if (!disposed && !loaded) setMapFailed(true);
+      }, 12000);
+    }).catch(() => setMapFailed(true));
+
+    return () => {
+      disposed = true;
+      if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+    map.resize();
+    let cancelled = false;
+
+    void import('maplibre-gl').then(({ Marker }) => {
+      if (cancelled || !mapRef.current) return;
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = positioned.map((person) => new Marker({ element: markerElement(person), anchor: 'bottom' }).setLngLat([person.location[1], person.location[0]]).addTo(map));
+    });
+
+    return () => { cancelled = true; };
+  }, [mapReady, people]);
+
+  const centre = () => mapRef.current?.flyTo({ center: CAMPUS_CENTER, zoom: DEFAULT_ZOOM, duration: 550 });
+  const zoomIn = () => mapRef.current?.zoomIn({ duration: 220 });
+  const zoomOut = () => mapRef.current?.zoomOut({ duration: 220 });
+
   return <section className="card map-card">
-    <TileMap people={people} />
+    {mapFailed ? <StaticCampusMap people={people} /> : <div ref={mapHost} className="map-surface map-live" aria-label="Peter Symonds College interactive street map" style={{ zIndex: 1 }} />}
+
+    {!mapFailed && !mapReady && <div style={{ position: 'absolute', inset: 0, zIndex: 8, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+      <div style={{ background: 'rgba(255,255,255,.94)', borderRadius: 16, padding: '12px 15px', boxShadow: '0 10px 30px rgba(20,50,90,.14)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#7183a3' }}><Navigation size={17} /><b style={{ color: '#0d2d63' }}>Loading live map…</b></div>
+    </div>}
+
     <div className="map-overlay">
       <div className="map-filter">{(['friends', 'nearby', 'everyone'] as const).map((f) => <button key={f} className={`filter-btn ${filter === f ? 'active' : ''}`} onClick={() => onFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>)}</div>
-      <div className="map-info"><span className="mode-dot" style={{ display: 'inline-block' }} /> Live street map · {people.length} visible</div>
+      <div className="map-info"><span className="mode-dot" style={{ display: 'inline-block' }} /> {mapFailed ? 'Saved campus map' : 'Live street map'} · {people.length} visible</div>
     </div>
+
+    {!mapFailed && <div style={{ position: 'absolute', right: 18, top: 76, zIndex: 14, display: 'grid', gap: 6 }}>
+      <button className="icon-btn" aria-label="Zoom in" title="Zoom in" onClick={zoomIn}><Plus size={18} /></button>
+      <button className="icon-btn" aria-label="Zoom out" title="Zoom out" onClick={zoomOut}><Minus size={18} /></button>
+    </div>}
+
     <div className="map-bottom">
       <div className="availability"><strong>{freeCount ? `${freeCount} ${freeCount === 1 ? 'person is' : 'people are'} free now` : 'No friends marked free yet'}</strong><span>{positioned.length ? `${positioned.length} visible on the map` : 'Share your location when you are ready'}</span></div>
-      <button className="icon-btn" aria-label="Centre map" title="Map is centred on Peter Symonds College"><LocateFixed size={18} /></button>
+      <button className="icon-btn" aria-label="Centre map" title="Centre map on Peter Symonds College" onClick={centre}><LocateFixed size={18} /></button>
     </div>
   </section>;
 }
