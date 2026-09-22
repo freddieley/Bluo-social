@@ -17,51 +17,58 @@ export async function POST(request: Request) {
     if (password.length < 8) return jsonError('Password must be at least 8 characters.');
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const secretKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !publishableKey || !secretKey) return jsonError('Authentication is not configured.', 500);
+    if (!url || !secretKey) return jsonError('Authentication is not configured.', 500);
 
-    // Resolve the public username to the underlying Auth email on the server.
-    // The email is never returned to the browser.
+    // Resolve the public username to the underlying Auth user on the server.
+    // The Auth email is never returned to the browser.
     const admin = createClient(url, secretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+
+    // limit(1) makes the login path resilient to an accidentally duplicated
+    // username row instead of turning the request into a 500.
     const { data: profile, error: profileError } = await admin
       .from('profiles')
       .select('id')
       .eq('username', username)
+      .limit(1)
       .maybeSingle();
 
-    if (profileError) return jsonError('Could not sign in right now.', 500);
+    if (profileError) {
+      console.error('username-login profile lookup failed', profileError);
+      return jsonError('Could not sign in right now.', 500);
+    }
     if (!profile) return jsonError('Incorrect username or password.', 401);
 
     const { data: userData, error: userError } = await admin.auth.admin.getUserById(profile.id);
-    if (userError || !userData.user?.email) return jsonError('Incorrect username or password.', 401);
+    if (userError || !userData.user?.email) {
+      console.error('username-login auth user lookup failed', userError);
+      return jsonError('Incorrect username or password.', 401);
+    }
 
-    // Let Supabase Auth verify the password. We do not inspect, store, or hash
-    // passwords ourselves, and the secret key is never sent to the browser.
-    const response = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: {
-        apikey: publishableKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ email: userData.user.email, password }),
-      cache: 'no-store',
+    // Verify the password through Supabase Auth using the server-only client.
+    // This avoids depending on a browser/public key for the password grant.
+    const { data: authData, error: authError } = await admin.auth.signInWithPassword({
+      email: userData.user.email,
+      password,
     });
 
-    const payload = await response.json();
-    if (!response.ok) return jsonError('Incorrect username or password.', 401);
+    if (authError || !authData.session) {
+      if (authError) console.error('username-login password verification failed', authError);
+      return jsonError('Incorrect username or password.', 401);
+    }
 
     return NextResponse.json({
-      access_token: payload.access_token,
-      refresh_token: payload.refresh_token,
-      expires_in: payload.expires_in,
-      expires_at: payload.expires_at,
-      token_type: payload.token_type,
-      user: payload.user,
+      access_token: authData.session.access_token,
+      refresh_token: authData.session.refresh_token,
+      expires_in: authData.session.expires_in,
+      expires_at: authData.session.expires_at,
+      token_type: authData.session.token_type,
+      user: authData.user,
     });
-  } catch {
+  } catch (error) {
+    console.error('username-login route threw', error);
     return jsonError('Could not sign in right now.', 500);
   }
 }
